@@ -253,8 +253,18 @@ function HomeScreen({ socket, setScreen, setPin, setPlayerId }) {
     return (
       <div className="screen-center">
         <div className="card" style={{ textAlign: 'center', maxWidth: 500 }}>
-          <h1 style={{ fontSize: '3rem', color: 'var(--purple)', marginBottom: 8 }}>FINNIVAL</h1>
-          <p style={{ fontSize: '1.2rem', marginBottom: 32 }}>The ultimate quiz battle with powers!</p>
+          <h1
+            style={{
+              fontSize: '3.4rem',
+              marginBottom: 8,
+              letterSpacing: 2,
+              color: 'var(--amber)',
+              textShadow: '-2px -2px 0 var(--indigo-deep), 2px -2px 0 var(--indigo-deep), -2px 2px 0 var(--indigo-deep), 2px 2px 0 var(--indigo-deep), 0 -2px 0 var(--indigo-deep), 0 2px 0 var(--indigo-deep), -2px 0 0 var(--indigo-deep), 2px 0 0 var(--indigo-deep), 0 4px 0 var(--indigo-deep)'
+            }}
+          >
+            FINNIVAL
+          </h1>
+          <p style={{ fontSize: '1.2rem', marginBottom: 32, color: 'var(--plum)', fontWeight: 700, textShadow: '-1px -1px 0 var(--indigo-deep), 1px -1px 0 var(--indigo-deep), -1px 1px 0 var(--indigo-deep), 1px 1px 0 var(--indigo-deep), 0 -1px 0 var(--indigo-deep), 0 1px 0 var(--indigo-deep), -1px 0 0 var(--indigo-deep), 1px 0 0 var(--indigo-deep)' }}>The ultimate quiz battle with powers!</p>
           <button className="btn btn-primary" onClick={() => setMode('host')} style={{ width: '100%', marginBottom: 16, fontSize: '1.2rem' }}>
             🎮 Host a Game
           </button>
@@ -296,9 +306,12 @@ function HomeScreen({ socket, setScreen, setPin, setPlayerId }) {
                     style={{
                       fontSize: '2rem',
                       padding: '8px 12px',
-                      border: avatar === a ? '3px solid var(--purple)' : '3px solid transparent',
-                      borderRadius: 8,
-                      background: avatar === a ? 'var(--yellow)' : 'white',
+                      border: avatar === a ? '3px solid var(--orange)' : '3px solid var(--plum-tint)',
+                      borderRadius: 'var(--radius-sm)',
+                      background: avatar === a ? 'var(--amber-tint)' : 'white',
+                      boxShadow: avatar === a ? '0 4px 0 var(--orange-dark)' : 'none',
+                      transform: avatar === a ? 'translateY(-2px)' : 'none',
+                      transition: 'all 0.15s',
                       cursor: 'pointer'
                     }}
                   >
@@ -333,7 +346,7 @@ function HomeScreen({ socket, setScreen, setPin, setPlayerId }) {
               value={joinPin}
               onChange={(e) => setJoinPin(e.target.value)}
               maxLength={6}
-              style={{ width: '100%', textAlign: 'center', fontSize: '1.5rem', letterSpacing: 8 }}
+              style={{ width: '100%', textAlign: 'center', fontSize: '1.5rem', letterSpacing: 8, fontFamily: "'Fredoka One', cursive", color: 'var(--indigo)', background: 'var(--amber-tint)' }}
             />
           </div>
         )}

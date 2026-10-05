@@ -17,17 +17,17 @@ const io = new Server(server, {
 const rooms = new Map();
 
 const POWERS = {
-  blind: { id: 'blind', name: 'Blackout', icon: '🌑', desc: 'Blind every other player for 5 seconds.' },
+  blind: { id: 'blind', name: 'Blackout', icon: '🌑', desc: 'Blind every other player for 10 seconds.' },
   steal: { id: 'steal', name: 'Heist', icon: '🪝', desc: 'Steal 30% of one rival\'s score.' },
   hint: { id: 'hint', name: 'Oracle', icon: '🔮', desc: 'Eliminate two wrong answers this round.' },
-  freeze: { id: 'freeze', name: 'Deep Freeze', icon: '❄️', desc: 'Lock one rival out for 5 seconds.' },
+  freeze: { id: 'freeze', name: 'Deep Freeze', icon: '❄️', desc: 'Lock one rival out for 10 seconds.' },
   scramble: { id: 'scramble', name: 'Scramble', icon: '🌀', desc: 'Shuffle answer colors for everyone else.' }
 };
 
 const SHAPES = ['triangle', 'diamond', 'circle', 'square'];
 
 const POWER_SELECT_DURATION_MS = 3600000;
-const FREEZE_DURATION_MS = 5000;
+const FREEZE_DURATION_MS = 10000;
 const POWER_COOLDOWN_MS = 120000;
 
 function generatePin() {
@@ -596,7 +596,7 @@ io.on('connection', (socket) => {
     const activePlayers = room.players.filter((p) => !p.isHost);
     io.to(room.pin).emit('answerCount', { answered: room.answers.size, total: activePlayers.length });
 
-    const everyone = activePlayers.length > 0 && activePlayers.every((p) => room.answers.has(p.id) || p.frozen);
+    const everyone = activePlayers.length > 0 && activePlayers.every((p) => room.answers.has(p.id));
     if (everyone) {
       clearTimeout(room.timer);
       setTimeout(() => revealAnswer(room), 600);
@@ -818,7 +818,7 @@ io.on('connection', (socket) => {
       consumePower((rm, actor) => {
         rm.players.forEach((p) => {
           if (p.id === actor.id) return;
-          io.to(p.id).emit('powerEffect', { type: 'blind', duration: 5000, from: actor.name });
+          io.to(p.id).emit('powerEffect', { type: 'blind', duration: 10000, from: actor.name });
         });
         io.to(rm.pin).emit('toast', { text: `🌑 ${actor.name} blacked out the room!`, tone: 'power' });
       });
@@ -866,6 +866,18 @@ io.on('connection', (socket) => {
           if (!liveTarget || !liveTarget.frozen) return;
           liveTarget.frozen = false;
           io.to(liveRoom.pin).emit('roomUpdate', roomSnapshot(liveRoom));
+          // Give unfrozen player extra time if everyone else already answered
+          if (liveRoom.state === 'question' && !liveRoom.answers.has(target.id)) {
+            const activePlayers = liveRoom.players.filter((p) => !p.isHost);
+            const othersAllDone = activePlayers.filter(p => p.id !== target.id).every(p => liveRoom.answers.has(p.id));
+            if (othersAllDone) {
+              clearTimeout(liveRoom.timer);
+              liveRoom.endsAt = Date.now() + 10000;
+              liveRoom.timer = setTimeout(() => revealAnswer(liveRoom), 10250);
+              io.to(liveRoom.pin).emit('timerResumed', { endsAt: liveRoom.endsAt });
+              io.to(target.id).emit('toast', { text: '❄️ Unfrozen! Quick, answer now!', tone: 'warn' });
+            }
+          }
         }, FREEZE_DURATION_MS);
       });
       return;

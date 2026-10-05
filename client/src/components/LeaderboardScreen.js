@@ -81,23 +81,23 @@ function LeaderboardScreen({ socket, gameState, room, pin, playerId }) {
                 
                 if (p.rank === 1) { 
                   rankDisplay = '🥇'; 
-                  bgColor = 'rgba(255, 215, 0, 0.1)'; 
-                  pillBg = '#FFD700'; 
-                  pillColor = '#000';
+                  bgColor = 'rgba(255, 175, 80, 0.15)'; 
+                  pillBg = 'var(--amber)'; 
+                  pillColor = 'var(--indigo-deep)';
                 } else if (p.rank === 2) { 
                   rankDisplay = '🥈'; 
-                  bgColor = 'rgba(192, 192, 192, 0.1)'; 
-                  pillBg = '#E0E0E0'; 
-                  pillColor = '#000';
+                  bgColor = 'rgba(130, 76, 151, 0.12)'; 
+                  pillBg = 'var(--plum-tint)'; 
+                  pillColor = 'var(--indigo)';
                 } else if (p.rank === 3) { 
                   rankDisplay = '🥉'; 
-                  bgColor = 'rgba(205, 127, 50, 0.1)'; 
-                  pillBg = '#CD7F32'; 
+                  bgColor = 'rgba(237, 116, 63, 0.12)'; 
+                  pillBg = 'var(--orange)'; 
                   pillColor = '#FFF';
                 }
                 
                 const isMe = p.id === playerId;
-                if (isMe && p.rank > 3) bgColor = 'rgba(255, 255, 255, 0.4)';
+                if (isMe && p.rank > 3) bgColor = 'var(--amber-tint)';
                 
                 return (
                   <motion.tr
@@ -109,7 +109,7 @@ function LeaderboardScreen({ socket, gameState, room, pin, playerId }) {
                     style={{
                       background: bgColor,
                       fontWeight: isMe ? 'bold' : 'normal',
-                      border: isMe ? '2px solid rgba(0, 0, 0, 0.1)' : 'none'
+                      border: isMe ? '2px solid var(--orange)' : 'none'
                     }}
                   >
                     <td style={{ fontSize: '1.6rem', textAlign: 'center' }}>{rankDisplay}</td>
@@ -126,7 +126,7 @@ function LeaderboardScreen({ socket, gameState, room, pin, playerId }) {
                         display: 'inline-block',
                         fontWeight: '900',
                         fontSize: '1.1rem',
-                        boxShadow: p.rank <= 3 ? '0 3px 6px rgba(0,0,0,0.15)' : 'none'
+                        boxShadow: p.rank <= 3 ? '0 3px 6px rgba(42,33,66,0.25)' : 'none'
                       }}>
                         <AnimatedScore value={p.score} />
                       </div>

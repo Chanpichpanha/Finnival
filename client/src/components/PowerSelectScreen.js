@@ -78,7 +78,7 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
                   borderRadius: 12,
                   border: '3px solid var(--dark)',
                   background: p.powerChosen ? 'var(--green)' : 'white',
-                  color: p.powerChosen ? 'var(--dark)' : '#666',
+                  color: p.powerChosen ? 'var(--dark)' : 'var(--muted)',
                   fontWeight: 700,
                   minWidth: 120
                 }}
@@ -89,7 +89,7 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
               </motion.div>
             ))}
           </div>
-          <p style={{ color: '#888', marginBottom: 16 }}>Auto-start in {formatMmSs(timeLeft)}. Force Start assigns random powers to anyone still picking.</p>
+          <p style={{ color: 'var(--muted)', marginBottom: 16 }}>Auto-start in {formatMmSs(timeLeft)}. Force Start assigns random powers to anyone still picking.</p>
           <motion.button
             className="btn btn-primary"
             onClick={forceStart}
@@ -108,7 +108,7 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
     <div className="screen-center">
       <div className="card" style={{ textAlign: 'center', maxWidth: 700 }}>
         <h2 style={{ marginBottom: 8 }}>Choose Your Power</h2>
-        <p style={{ marginBottom: 8, color: '#666' }}>Pick wisely — it recharges every 2 minutes, so you can use it again and again!</p>
+        <p style={{ marginBottom: 8, color: 'var(--muted)' }}>Pick wisely — it recharges every 2 minutes, so you can use it again and again!</p>
         <p style={{ marginBottom: 24, fontWeight: 700, color: timeLeft <= 30 ? 'var(--red)' : 'var(--purple)' }}>
           ⏱ {formatMmSs(timeLeft)} remaining
         </p>
@@ -134,7 +134,7 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
                 >
                   <div className="power-icon">{p.icon}</div>
                   <h3>{p.name}</h3>
-                  <p style={{ fontSize: '0.9rem', color: '#666' }}>{p.desc}</p>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--muted)' }}>{p.desc}</p>
                 </motion.div>
               ))}
             </div>
@@ -168,7 +168,7 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
           >
             <div style={{ fontSize: '4rem', marginBottom: 16 }}>✅</div>
             <h3 style={{ marginBottom: 8 }}>Power Locked In!</h3>
-            <p style={{ color: '#666', marginBottom: 16 }}>Waiting for other players...</p>
+            <p style={{ color: 'var(--muted)', marginBottom: 16 }}>Waiting for other players...</p>
             <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--purple)' }}>
               {chosenCount}/{nonHostPlayers.length} players ready
             </div>

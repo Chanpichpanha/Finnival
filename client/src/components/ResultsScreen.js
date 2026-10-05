@@ -52,8 +52,10 @@ function ResultsScreen({ socket, gameState, pin, setScreen }) {
               style={{
                 padding: '20px',
                 margin: '12px 0',
-                background: i === 0 ? 'linear-gradient(135deg, #FFD700, #FFA500)' : i === 1 ? 'linear-gradient(135deg, #C0C0C0, #A0A0A0)' : 'linear-gradient(135deg, #CD7F32, #A0522D)',
+                background: i === 0 ? 'linear-gradient(135deg, var(--amber), var(--orange))' : i === 1 ? 'linear-gradient(135deg, var(--plum-tint), #CFC4DC)' : 'linear-gradient(135deg, var(--orange), var(--orange-dark))',
                 borderRadius: 12,
+                border: '4px solid var(--indigo-deep)',
+                boxShadow: '0 6px 0 var(--indigo-deep)',
                 color: i < 3 ? 'white' : 'inherit',
                 fontSize: i === 0 ? '1.5rem' : '1.2rem'
               }}
@@ -66,8 +68,8 @@ function ResultsScreen({ socket, gameState, pin, setScreen }) {
               >
                 {i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}
               </motion.div>
-              <div style={{ fontWeight: 700 }}>{p.avatar} {p.name}</div>
-              <div style={{ fontSize: '1.3rem' }}><AnimatedScore value={p.score} /> pts</div>
+              <div style={{ fontWeight: 800, color: 'white', letterSpacing: '1px', WebkitTextStroke: '2px var(--indigo-deep)', paintOrder: 'stroke fill' }}>{p.avatar} {p.name}</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'white', letterSpacing: '1px', WebkitTextStroke: '2px var(--indigo-deep)', paintOrder: 'stroke fill' }}><AnimatedScore value={p.score} /> pts</div>
             </motion.div>
           ))}
         </div>

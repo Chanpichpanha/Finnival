@@ -131,7 +131,7 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
     }
 
     return (
-        <div style={{ padding: 16, background: 'rgba(0,0,0,0.2)', borderRadius: 12 }}>
+        <div style={{ padding: 16, background: 'rgba(42,33,66,0.45)', borderRadius: 12 }}>
             <h3 style={{ color: 'white', textAlign: 'center', marginBottom: 24 }}>Connect the pairs (Drag or Click)</h3>
             
             <div ref={containerRef} style={{ display: 'flex', gap: 60, justifyContent: 'center', position: 'relative', touchAction: 'none' }} >
@@ -139,17 +139,16 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                 <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1, overflow: 'visible' }}>
                     {lines.map((l, i) => {
                         const isCorrect = l.leftIdx === l.rightIdx;
-                        const colors = ['#fbc531', '#00a8ff', '#9c88ff', '#e84118'];
+                        const colors = ['#FFAF50', '#ED743F', '#824C97', '#2BA89A'];
                         let lineColor = colors[l.leftIdx % colors.length];
-                        if (isReveal) lineColor = isCorrect ? '#4cd137' : '#e84118';
+                        if (isReveal) lineColor = isCorrect ? '#3DBE8B' : '#E5484D';
                         
                         return (
                         <g key={`line-${l.leftIdx}-${l.rightIdx}`}>
                             {/* Thick black cartoon outline */}
                             <motion.line 
                                 x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
-                                stroke="#1e272e"
-                                strokeWidth={13}
+                                stroke="#2A2142" strokeWidth={13}
                                 strokeLinecap="round"
                                 initial={{ pathLength: 0 }}
                                 animate={{ pathLength: 1 }}
@@ -158,8 +157,7 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                             {/* Bright inner cartoon color */}
                             <motion.line 
                                 x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
-                                stroke={lineColor}
-                                strokeWidth={8}
+                                stroke={lineColor} strokeWidth={8}
                                 strokeLinecap="round"
                                 initial={{ pathLength: 0 }}
                                 animate={{ pathLength: 1 }}
@@ -172,11 +170,11 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                         <g>
                             <line 
                                 x1={dragLine.x1} y1={dragLine.y1} x2={dragLine.x2} y2={dragLine.y2}
-                                stroke="#1e272e" strokeWidth={13} strokeLinecap="round" strokeDasharray="16 16" style={{ transition: "none" }}
+                                stroke="#2A2142" strokeWidth={13} strokeLinecap="round" strokeDasharray="16 16" style={{ transition: "none" }}
                             />
                             <line 
                                 x1={dragLine.x1} y1={dragLine.y1} x2={dragLine.x2} y2={dragLine.y2}
-                                stroke="#ffffff" strokeWidth={8} strokeLinecap="round" strokeDasharray="16 16" style={{ transition: "none" }}
+                                stroke="#FFF6EC" strokeWidth={8} strokeLinecap="round" strokeDasharray="16 16" style={{ transition: "none" }}
                             />
                         </g>
                     )}
@@ -187,7 +185,7 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                         <button 
                             key={`left-${i}`}
                             ref={el => leftRefs.current[i] = el}
-                            className={`btn ${matches[i] !== undefined || activeDragTarget === i ? 'btn-primary' : 'btn-secondary'}`}
+                            className="btn"
                             onPointerDown={(e) => handlePointerDown(e, i)}
                             onDragStart={(e) => e.preventDefault()}
                             draggable={false}
@@ -195,13 +193,16 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                                 if (answered || isFrozen || isReveal) return;
                                 setActiveDragTarget(activeDragTarget === i ? null : i); // Toggle click
                             }}
-                            
                             style={{ 
                                 padding: 16, 
                                 fontSize: '1.1rem', 
-                                border: '3px solid var(--dark)',
-                                
-                                cursor: (answered || isFrozen || isReveal) ? 'not-allowed' : 'grab'
+                                background: matches[i] !== undefined || activeDragTarget === i ? '#423465' : 'linear-gradient(180deg, #9560AB 0%, var(--plum) 100%)',
+                                color: 'white',
+                                border: '3px solid var(--indigo-deep)',
+                                boxShadow: '0 4px 0 var(--indigo-deep)',
+                                borderRadius: '12px',
+                                cursor: (answered || isFrozen || isReveal) ? 'not-allowed' : 'grab',
+                                transition: 'all 0.2s ease'
                             }}
                         >
                             {p.left}
@@ -217,17 +218,20 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                             <button 
                                 key={`right-${realIndex}`}
                                 ref={el => rightRefs.current[realIndex] = el}
-                                className={`btn ${isMatched ? 'btn-primary' : 'btn-secondary'} match-right-btn`}
+                                className="btn match-right-btn"
                                 data-index={realIndex}
                                 onClick={() => handleRightClick(realIndex)}
                                 onDragStart={(e) => e.preventDefault()}
                                 draggable={false}
-                                
                                 style={{ 
                                     padding: 16, 
                                     fontSize: '1.1rem', 
-                                    border: '3px solid var(--dark)',
-                                    
+                                    background: isMatched ? '#423465' : 'linear-gradient(180deg, #9560AB 0%, var(--plum) 100%)',
+                                    color: 'white',
+                                    border: '3px solid var(--indigo-deep)',
+                                    boxShadow: '0 4px 0 var(--indigo-deep)',
+                                    borderRadius: '12px',
+                                    transition: 'all 0.2s ease'
                                 }}
                             >
                                 {p.right}
@@ -252,7 +256,7 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                 )}
                 {isReveal && (
                     <div style={{ color: 'white', fontSize: '1.2rem', fontWeight: 'bold' }}>
-                        Correct matches are highlighted in green.
+                        Correct matches will have green lines.
                     </div>
                 )}
             </div>

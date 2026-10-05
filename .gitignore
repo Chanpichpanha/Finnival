@@ -6,3 +6,12 @@ npm-debug.log*
 .DS_Store
 
 *.zip
+
+# Build output
+client/build/
+
+# Data files
+server/data/
+
+# OS junk
+Thumbs.db

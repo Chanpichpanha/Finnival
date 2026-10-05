@@ -195,14 +195,14 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
  <h2 style={{ color: 'white', marginBottom: 16 }}>Saved Question Sets</h2>
  <div className="card" style={{ marginBottom: 24 }}>
  {savedSets.length === 0 ? (
- <p style={{ color: '#888' }}>No saved sets yet. Add questions below, then save them for next time.</p>
+ <p style={{ color: 'var(--muted)' }}>No saved sets yet. Add questions below, then save them for next time.</p>
  ) : (
  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
  {savedSets.map((s) => (
  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', border: '2px solid var(--dark)', borderRadius: 10 }}>
  <div>
  <div style={{ fontWeight: 700 }}>{s.name}</div>
- <div style={{ fontSize: '0.8rem', color: '#666' }}>{s.questionCount} question{s.questionCount !== 1 ? 's' : ''}</div>
+ <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{s.questionCount} question{s.questionCount !== 1 ? 's' : ''}</div>
  </div>
  <div style={{ display: 'flex', gap: 8 }}>
  <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: '0.85rem' }} onClick={() => loadSet(s.id)}>Load</button>
@@ -325,7 +325,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
             {(newQuestion.pairs || []).map((p, i) => (
-            <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', background: 'rgba(255,255,255,0.4)', padding: 12, borderRadius: 8, border: '2px dashed var(--dark)' }}>
+            <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', background: 'var(--cream)', padding: 12, borderRadius: 8, border: '2px dashed var(--plum)' }}>
                 <span style={{ fontWeight: 'bold', width: 30 }}>#{i+1}</span>
                 <input className="input" placeholder="Left Side Item" value={p.left} onChange={(e) => { const np = [...newQuestion.pairs]; np[i].left = e.target.value; setNewQuestion({...newQuestion, pairs: np}); }} style={{ flex: '1 1 120px', minWidth: '120px', margin: 0 }} />
                 <span style={{ fontSize: '1.5rem' }}>➔</span>
@@ -333,7 +333,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
             </div>
             ))}
         </div>
-        <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: 12 }}>
+        <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: 12 }}>
            *The left side items will be locked in place. The right side items will be randomly shuffled for the players.
         </p>
       </>
@@ -376,7 +376,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
  >
  <div style={{ overflow: 'hidden' }}>
  <div style={{ fontWeight: 700 }}>{i + 1}. {q.text}</div>
- <div style={{ fontSize: '0.85rem', color: '#666' }}>
+ <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
  Type: {q.type || 'classic'} · {q.timeLimit}s
  </div>
  </div>

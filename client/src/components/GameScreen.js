@@ -13,11 +13,11 @@ const POWER_META = {
 };
 
 const BURST_META = {
-  blind: { icon: '🌑', text: 'Blackout!', color: '#2D3436' },
-  steal: { icon: '🪝', text: 'Heist!', color: '#6C5CE7' },
-  hint: { icon: '🔮', text: 'Oracle activated', color: '#74B9FF' },
-  frozen: { icon: '❄️', text: 'Frozen!', color: '#74B9FF' },
-  scramble: { icon: '🌀', text: 'Scrambled!', color: '#FD79A8' }
+  blind: { icon: '🌑', text: 'Blackout!', color: '#2A2142' },
+  steal: { icon: '🪝', text: 'Heist!', color: '#824C97' },
+  hint: { icon: '🔮', text: 'Oracle activated', color: '#FFAF50' },
+  frozen: { icon: '❄️', text: 'Frozen!', color: '#2BA89A' },
+  scramble: { icon: '🌀', text: 'Scrambled!', color: '#ED743F' }
 };
 
 function Particles({ color }) {
@@ -68,7 +68,7 @@ function PowerBurst({ effect, onDone }) {
   }, [effect]);
 
   if (!effect) return null;
-  const meta = BURST_META[effect.type] || { icon: '✨', text: 'Power!', color: '#6C5CE7' };
+  const meta = BURST_META[effect.type] || { icon: '✨', text: 'Power!', color: '#824C97' };
 
   return (
     <motion.div
@@ -301,7 +301,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
         </div>
 
         <div className="card" style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: 4 }}>Current question (read-only)</p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: 4 }}>Current question (read-only)</p>
             <div className="question-text" style={{ fontSize: '1.1rem' }}>{question.text}</div>
             
             {(!question.type || question.type === 'classic') && (
@@ -325,19 +325,19 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
             )}
 
             {question.type === 'short_answer' && (
-              <div style={{ marginTop: 12, padding: 12, background: 'rgba(255,255,255,0.8)', borderRadius: 8, fontWeight: 'bold' }}>
+              <div style={{ marginTop: 12, padding: 12, background: 'var(--amber-tint)', borderRadius: 8, fontWeight: 'bold' }}>
                 Type: Short Answer | Correct: {question.correctAnswerText}
               </div>
             )}
 
             {question.type === 'slider' && (
-              <div style={{ marginTop: 12, padding: 12, background: 'rgba(255,255,255,0.8)', borderRadius: 8, fontWeight: 'bold' }}>
+              <div style={{ marginTop: 12, padding: 12, background: 'var(--amber-tint)', borderRadius: 8, fontWeight: 'bold' }}>
                 Type: Slider | Min: {question.min} | Max: {question.max} | Target: {question.correctNumber}
               </div>
             )}
 
             {question.type === 'match' && (
-              <div style={{ marginTop: 12, padding: 12, background: 'rgba(255,255,255,0.8)', borderRadius: 8, fontWeight: 'bold' }}>
+              <div style={{ marginTop: 12, padding: 12, background: 'var(--amber-tint)', borderRadius: 8, fontWeight: 'bold' }}>
                 Type: Drag & Drop Match
                 <div style={{ marginTop: 8 }}>
                   {question.pairs?.map((p, i) => (
@@ -395,17 +395,17 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                   padding: '8px 12px',
                   borderRadius: 10,
                   border: '2px solid var(--dark)',
-                  background: p.frozen ? '#dceefe' : 'white'
+                  background: p.frozen ? '#E0F4F1' : 'white'
                 }}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
                   <span style={{ fontSize: '1.3rem' }}>{p.avatar}</span>
                   {p.name}
                   {p.frozen && <span title="Frozen">❄️</span>}
-                  {!p.connected && <span title="Disconnected" style={{ color: '#c00' }}>⚠️</span>}
+                  {!p.connected && <span title="Disconnected" style={{ color: 'var(--red)' }}>⚠️</span>}
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ color: '#666' }}><AnimatedScore value={p.score} /> pts</span>
+                  <span style={{ color: 'var(--muted)' }}><AnimatedScore value={p.score} /> pts</span>
                   <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => kickPlayer(p.id)}>Kick</button>
                   <button className="btn btn-danger" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => banPlayer(p.id)}>Ban</button>
                 </span>
@@ -427,13 +427,14 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <motion.div
-              initial={{ scale: 0.7 }}
-              animate={{ scale: [0.7, 1.1, 1] }}
-              transition={{ duration: 0.4 }}
-            >
-              🌑 Blinded! Someone hit Blackout...
-            </motion.div>
+            {Array.from({length:30}).map((_,i) => {
+              const left = [5,92,18,73,45,60,30,85,12,55,38,78,22,67,50,8,95,42,70,15,63,33,88,25,58,48,82,10,75,40][i];
+              const size = [80,120,60,140,100,90,110,70,130,85,95,75,115,65,105,125,88,72,135,68,98,82,108,78,118,92,128,62,102,86][i];
+              const delay = [0,0,0.05,0.05,0.1,0.1,0.15,0.15,0.2,0.2,0.25,0.25,0.3,0.3,0.35,0.35,0.4,0.4,0.45,0.45,0.5,0.5,0.55,0.55,0.6,0.6,0.65,0.65,0.7,0.7][i];
+              const dur = [0.4,0.5,0.3,0.6,0.45,0.35,0.55,0.4,0.5,0.3,0.45,0.55,0.35,0.6,0.4,0.3,0.5,0.35,0.45,0.4,0.55,0.3,0.4,0.5,0.35,0.45,0.4,0.3,0.5,0.35][i];
+              return <div key={i} className="smoke-bubble" style={{left:left+'%',width: 'var(--bubble-size)', height: 'var(--bubble-size)', '--bubble-size': size + 'px',animationDelay:delay+'s',animationDuration:dur+'s'}} />;
+            })}
+            <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,background:'#000',animation:'blackoutFill 1s linear forwards',opacity:0,zIndex:2}} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -454,7 +455,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
             className="power-action-btn"
             onClick={activatePower}
             disabled={!canUsePower}
-            animate={canUsePower ? { boxShadow: ['0 0 4px rgba(108,92,231,0.4)', '0 0 16px rgba(108,92,231,0.9)', '0 0 4px rgba(108,92,231,0.4)'] } : {}}
+            animate={canUsePower ? { boxShadow: ['0 0 4px rgba(130,76,151,0.4)', '0 0 16px rgba(130,76,151,0.9)', '0 0 4px rgba(130,76,151,0.4)'] } : {}}
             transition={canUsePower ? { duration: 1.8, repeat: Infinity, ease: 'easeInOut' } : {}}
           >
             <span style={{ fontSize: '1.4rem', marginRight: 8 }}>{powerMeta.icon}</span>
@@ -560,7 +561,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
             }
 
             return (
-            <div style={{ padding: 24, textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: 12 }}>
+            <div style={{ padding: 24, textAlign: 'center', background: 'rgba(42,33,66,0.45)', borderRadius: 12 }}>
               <h3 style={{ color: 'white', marginBottom: 24 }}>Type your answer:</h3>
               <input 
                 type="text" 
@@ -577,9 +578,10 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                     textAlign: 'center',
                     backgroundColor: inputBg,
                     color: inputColor,
-                    border: isReveal ? (isCorrect ? '4px solid #2ecc71' : '4px solid #e74c3c') : '4px solid var(--dark)',
+                    border: '4px solid var(--indigo-deep)',
+                    boxShadow: '0 4px 0 var(--indigo-deep)',
                     transition: 'all 0.3s ease',
-                    fontWeight: isReveal ? 'bold' : 'normal'
+                    fontWeight: 'bold', fontFamily: "'Fredoka One', cursive"
                 }}
               />
               <br/>
@@ -598,18 +600,18 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                     style={{ 
                         marginTop: 16, 
                         padding: '16px',
-                        background: 'rgba(255,255,255,0.95)', 
+                        background: 'var(--cream)', 
                         borderRadius: 12,
                         color: 'var(--dark)', 
                         fontSize: '1.4rem', 
                         fontWeight: 'bold',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                        boxShadow: '0 4px 12px rgba(42,33,66,0.25)',
                         border: '3px solid var(--dark)',
                         display: 'inline-block',
                         minWidth: '250px'
                     }}
                 >
-                  <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: '#666', marginBottom: 4 }}>Correct Answer</div>
+                  <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Correct Answer</div>
                   <div style={{ color: 'var(--green)' }}>{gameState.correctAnswerText || question.correctAnswerText}</div>
                 </div>
               )}
@@ -618,19 +620,20 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
         })()}
 
         {question.type === 'slider' && (
-          <div style={{ padding: 24, textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: 12 }}>
+          <div style={{ padding: 24, textAlign: 'center', background: 'rgba(42,33,66,0.45)', borderRadius: 12 }}>
             <h3 style={{ color: 'white', marginBottom: 24 }}>Drag to select:</h3>
             <div style={{ fontSize: '3rem', marginBottom: 24, color: 'white', fontWeight: 'bold' }}>{sliderValue}</div>
             <input 
-              type="range" 
-              min={question.min} 
-              max={question.max} 
-              value={sliderValue}
-              onChange={(e) => setSliderValue(Number(e.target.value))}
-              disabled={answered || isFrozen || gameState?.isReveal}
-              style={{ width: '100%', maxWidth: 600, marginBottom: 12, height: 20 }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', maxWidth: 600, margin: '0 auto 32px auto', color: '#aaa', fontWeight: 'bold', fontSize: '1.2rem' }}>
+                type="range" 
+                min={question.min} 
+                max={question.max} 
+                value={sliderValue}
+                onChange={(e) => setSliderValue(Number(e.target.value))}
+                disabled={answered || isFrozen || gameState?.isReveal}
+                className="custom-slider"
+                style={{ width: '100%', maxWidth: 600, marginBottom: 12 }}
+              />
+            <div style={{ display: 'flex', justifyContent: 'space-between', maxWidth: 600, margin: '0 auto 32px auto', color: 'var(--amber-tint)', fontWeight: 'bold', fontSize: '1.2rem' }}>
                <span>{question.min}</span><span>{question.max}</span>
             </div>
             <button 
@@ -642,8 +645,20 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
               Submit Answer
             </button>
             {gameState?.isReveal && (
-                <div style={{ marginTop: 24, color: '#4cd137', fontSize: '1.5rem', fontWeight: 'bold' }}>
-                  Target: {gameState.correctNumber !== undefined ? gameState.correctNumber : question.correctNumber}
+                <div style={{ marginTop: 24, textAlign: 'center' }}>
+                  <div style={{ 
+                    display: 'inline-block',
+                    background: 'linear-gradient(135deg, var(--amber-tint), var(--amber))', 
+                    border: '4px solid var(--indigo-deep)',
+                    borderRadius: 12,
+                    padding: '16px 32px',
+                    boxShadow: '0 4px 0 var(--indigo-deep)'
+                  }}>
+                    <div style={{ color: 'var(--indigo)', fontWeight: 700, fontSize: '0.9rem', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>CORRECT ANSWER</div>
+                    <div style={{ color: 'var(--indigo-deep)', fontSize: '2.5rem', fontWeight: 900, fontFamily: "'Fredoka One', cursive" }}>
+                      {gameState.correctNumber !== undefined ? gameState.correctNumber : question.correctNumber}
+                    </div>
+                  </div>
                 </div>
               )}
           </div>
@@ -666,7 +681,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
       {isScrambled && (
         <motion.div
           className="frozen-notice"
-          style={{ background: '#FD79A8', color: 'white', border: 'none' }}
+          style={{ background: 'linear-gradient(135deg, var(--plum), var(--orange))', color: 'white', border: 'none' }}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
         >
@@ -675,11 +690,50 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
       )}
       {isFrozen && (
         <motion.div
-          className="frozen-notice"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
+          style={{
+             position: 'fixed',
+             top: 0, left: 0, right: 0, bottom: 0,
+             background: 'rgba(150, 210, 255, 0.35)', // low opacity light blue
+             pointerEvents: 'all', // blocks clicks
+             zIndex: 9999,
+             display: 'flex',
+             flexDirection: 'column',
+             justifyContent: 'center',
+             alignItems: 'center',
+             backdropFilter: 'blur(3px)'
+          }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
         >
-          ❄️ You're frozen for a few seconds!
+          <div className="snowflakes" aria-hidden="true">
+            <div className="snowflake">❅</div>
+            <div className="snowflake">❆</div>
+            <div className="snowflake">❅</div>
+            <div className="snowflake">❆</div>
+            <div className="snowflake">❅</div>
+            <div className="snowflake">❆</div>
+            <div className="snowflake">❅</div>
+            <div className="snowflake">❆</div>
+          </div>
+          <div style={{
+              background: 'rgba(255, 255, 255, 0.95)', 
+              padding: '30px 50px', 
+              borderRadius: '24px', 
+              color: '#0066cc', 
+              fontSize: '2.5rem', 
+              fontWeight: '900',
+              fontFamily: "'Fredoka One', cursive",
+              boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+              textAlign: 'center',
+              border: '6px solid #b3d9ff', transform: 'scale(0.8)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', whiteSpace: 'nowrap', marginBottom: '8px' }}>
+              <span>❄️</span>
+              <span>DEEP FREEZE</span>
+              <span>❄️</span>
+            </div>
+            <span style={{fontSize: '1.2rem', color: '#66a3ff', fontFamily: 'Inter, sans-serif'}}>You have been frozen</span>
+          </div>
         </motion.div>
       )}
       {answered && !isFrozen && (

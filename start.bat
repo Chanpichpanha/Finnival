@@ -34,7 +34,7 @@ start "Finnival Server" cmd /k "cd /d ""%~dp0server"" && npm start"
 timeout /t 3 /nobreak >nul
 
 echo [4/4] Starting client...
-start "Finnival Client" cmd /k "cd /d ""%~dp0client"" && set PORT=3002 && npm start"
+ start "Finnival Client" cmd /k "cd /d ""%~dp0client"" && set PORT=3002 && npm start"
 
 echo.
 echo ========================================
