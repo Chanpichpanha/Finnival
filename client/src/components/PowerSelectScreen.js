@@ -2,10 +2,10 @@
 import { motion, AnimatePresence } from 'framer-motion';
 
 const POWERS = [
-  { id: 'blind', name: 'Blackout', icon: '🌑', desc: 'Blind every other player for 5 seconds.' },
-  { id: 'steal', name: 'Heist', icon: '🪝', desc: 'Steal 50% of one rival\'s points this round if they guess right.' },
+  { id: 'blind', name: 'Blackout', icon: '🌑', desc: 'Blind every other player for 10 seconds.' },
+  { id: 'steal', name: 'Heist', icon: '🪝', desc: 'Steal 30% of one rival\'s score.' },
   { id: 'hint', name: 'Oracle', icon: '🔮', desc: 'Eliminate two wrong answers this round.' },
-  { id: 'freeze', name: 'Deep Freeze', icon: '❄️', desc: 'Lock one rival out for 5 seconds.' },
+  { id: 'freeze', name: 'Deep Freeze', icon: '❄️', desc: 'Lock one rival out for 10 seconds.' },
   { id: 'scramble', name: 'Scramble', icon: '🌀', desc: 'Shuffle answer colors for everyone else.' }
 ];
 
