@@ -18,7 +18,7 @@ const rooms = new Map();
 
 const POWERS = {
   blind: { id: 'blind', name: 'Blackout', icon: '🌑', desc: 'Blind every other player for 10 seconds.' },
-  steal: { id: 'steal', name: 'Heist', icon: '🪝', desc: 'Steal 30% of one rival\'s score.' },
+  steal: { id: 'steal', name: 'Heist', icon: '🪝', desc: 'Steal 50% of a rival\'s round points at the end of the round.' },
   hint: { id: 'hint', name: 'Oracle', icon: '🔮', desc: 'Eliminate two wrong answers this round.' },
   freeze: { id: 'freeze', name: 'Deep Freeze', icon: '❄️', desc: 'Lock one rival out for 10 seconds.' },
   scramble: { id: 'scramble', name: 'Scramble', icon: '🌀', desc: 'Shuffle answer colors for everyone else.' }
@@ -460,6 +460,26 @@ io.on('connection', (socket) => {
       return count;
     });
 
+    // === HEIST SETTLEMENT: steal 50% of rival's round points ===
+    const activePlayers = room.players.filter((p) => !p.isHost);
+    activePlayers.forEach(heister => {
+      if (!heister.heistTarget) return;
+      const target = room.players.find(p => p.id === heister.heistTarget);
+      heister.heistTarget = null; // clear regardless
+      if (!target) return;
+      const targetAnswer = room.answers.get(target.id);
+      // Only steal if target answered correctly and earned points
+      if (targetAnswer && targetAnswer.points > 0) {
+        const stolen = Math.floor(targetAnswer.points * 0.5);
+        target.score -= stolen;
+        heister.score += stolen;
+        targetAnswer.points -= stolen; // update the recorded points
+        io.to(room.pin).emit('toast', { text: `🪝 ${heister.name} stole ${stolen} points from ${target.name}!`, tone: 'power' });
+      } else {
+        io.to(heister.id).emit('toast', { text: `🪝 ${target.name} got nothing right — nothing to steal!`, tone: 'warn' });
+      }
+    });
+
     const scorer = [...room.players].filter((p) => !p.isHost).sort((a, b) => b.score - a.score);
     io.to(room.pin).emit('answerReveal', {
         correctAnswer: q.correctAnswer,
@@ -571,16 +591,6 @@ io.on('connection', (socket) => {
     const points = Math.floor(base + speed + streakBonus);
 
     let earnedPoints = points;
-    if (points > 0) {
-      const heister = room.players.find(p => p.heistTarget === player.id);
-      if (heister) {
-        const stolen = Math.floor(points * 0.5);
-        earnedPoints -= stolen;
-        heister.score += stolen;
-        heister.heistTarget = null;
-        io.to(room.pin).emit('toast', { text: `🪝 ${heister.name} stole ${stolen} points from ${player.name}'s answer!`, tone: 'power' });
-      }
-    }
     player.score += earnedPoints;
 
     room.answers.set(socket.id, { answerIndex, correct: isCorrect, points: earnedPoints });
@@ -829,14 +839,13 @@ io.on('connection', (socket) => {
       consumePower((rm, actor) => {
         const target = rm.players.find((p) => p.id === targetId && p.id !== actor.id);
         if (!target) { actor.powerCooldownUntil = 0; return; }
-        const amount = Math.floor(target.score * 0.3);
-        target.score -= amount;
-        actor.score += amount;
+        // Mark the heist target — steal happens at round end in revealAnswer
+        actor.heistTarget = target.id;
         io.to(rm.pin).emit('toast', {
-          text: `🪝 ${actor.name} stole ${amount} points from ${target.name}!`,
+          text: `🪝 ${actor.name} set a heist on ${target.name}!`,
           tone: 'power'
         });
-        io.to(rm.pin).emit('powerEffect', { type: 'steal', from: actor.name, target: target.name, amount });
+        io.to(actor.id).emit('powerEffect', { type: 'steal', from: actor.name, target: target.name, amount: 0 });
       });
       return;
     }

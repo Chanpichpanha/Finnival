@@ -159,7 +159,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
     setEliminated(null);
     setPickingTarget(false);
     setSelectedOption(null);
-    setFrozenUntil(me?.frozen ? Date.now() + 5000 : 0);
+    setFrozenUntil(me?.frozen ? Date.now() + 10000 : 0);
     setBlindedUntil(0);
     setScrambledUntil(0);
     const len = gameState?.question?.options?.length || 4;
@@ -192,7 +192,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
     const handlePowerEffect = (effect) => {
       if (effect.type === 'hint') setEliminated(effect.eliminate);
       if (effect.type === 'blind') setBlindedUntil(Date.now() + effect.duration);
-      if (effect.type === 'frozen') setFrozenUntil(Date.now() + (effect.duration || 5000));
+      if (effect.type === 'frozen') setFrozenUntil(Date.now() + (effect.duration || 10000));
       if (effect.type === 'scramble') {
         setScrambledUntil(Date.now() + (effect.duration || 15000));
         let valid = false;
@@ -279,7 +279,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   }, [scrambledUntil]);
 
   const isScrambled = scrambledUntil > Date.now() && !gameState?.isReveal;
-  const rivals = room?.players.filter((p) => p.id !== playerId) || [];
+  const rivals = room?.players.filter((p) => p.id !== playerId && !p.isHost) || [];
   const isUrgent = timeLeft <= 3 && timeLeft > 0;
   const contestants = room?.players.filter((p) => !p.isHost) || [];
 
