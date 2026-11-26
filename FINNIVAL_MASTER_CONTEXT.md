@@ -1,4 +1,4 @@
-﻿# 🎮 FINNIVAL — Complete Project Master Architecture, History & Bug Audit
+# 🎮 FINNIVAL — Complete Project Master Architecture, History & Bug Audit
 
 > **Document Purpose**: This file serves as the single source of truth for the **Finnival** codebase. It contains the complete architectural breakdown, development history, game mechanics, and a technical audit of all active bugs, discrepancies, and immediate action items.
 
@@ -281,3 +281,32 @@ Rather than being limited to standard 4-option MCQs, the engine supports 4 disti
     * 🌀 *Scramble*: Performs in-place shuffle of *unmatched* right-side items, immediately clearing active mid-drag line while preserving existing valid connections.
 * **Minimalist Pause Screen**:
   * Removed explanatory text under the pause overlay on contestant screens, retaining only the large `⏸️` icon and bold `Game Paused by Host` title over the frosted blur.
+
+### Milestone 7: Audio Engine, QR Code Join, Lobby Chat & Shielding (Completed)
+* **Web Audio API Engine (`client/src/utils/sound.js`)**:
+  * Zero-external-asset arcade synthesizer using Web Audio API.
+  * SFX for question countdown ticks (`playTick(isUrgent)`), answer submission (`playSubmit`), powers (`playFreeze`, `playHeist`, `playScramble`, `playOracle`), `playDoublePoints()`, and final podium fanfare (`playPodium()`).
+  * Persistent volume/mute toggle (`🔊` / `🔇`) stored in `localStorage`.
+* **Automatic LAN IP & QR Code Join (`LobbyScreen.js`)**:
+  * Server dynamically detects true Wi-Fi/Ethernet IPv4 via `getLanIp()`, filtering virtual adapters.
+  * Host lobby displays real-time auto-generated QR code (`qrcode.react`) encoding `http://<LAN_IP>:3002/?pin=XXXXXX`.
+  * Mobile devices scanning the QR automatically land on the join screen with the 6-digit PIN pre-filled.
+* **Lobby Chatbox & Floating Reaction Dock**:
+  * Real-time lobby chatbox with 50-message cap, 120-character limit, and autoscroll.
+  * Floating animated emoji reactions (`🔥`, `💀`, `😭`, `😂`, `👑`, `🪝`) with 5s cooldown, audio pop triggers, and floating Framer Motion animations across contestant screens.
+* **Third-Party Script Error Shielding**:
+  * Defensive capture-phase exception handlers in `public/index.html` and `src/index.js` preventing third-party browser wallet/reader injections (e.g. Brave iOS Web3 / Firefox user-scripts) from displaying red React error overlays.
+
+### Milestone 8: In-Game 2× Points, Battle Feed & Image Uploads (Completed)
+* **Mid-Question `🔥 2× Points` Host Power**:
+  * Host can click "🔥 2× Points" mid-question.
+  * Retroactively doubles speed points for any player who already answered, and applies 2× to future answers in that round.
+  * Shows flashing amber warning banner on contestant screens: *"🔥 DOUBLE POINTS ACTIVE! Correct answers score 2×!"*.
+* **Host Live Battle Feed & Contestant Pulse Chips**:
+  * Real-time live activity feed on host screen displaying player answers and power activations as they occur.
+  * Animated pulse chips showing who has submitted in real time.
+* **Dynamic Question Images with Compression & Automated Purge**:
+  * Questions support optional image URLs or local file uploads (`/api/upload-image`).
+  * Canvas-based client downscaling to max 1200×1200px at 85% JPEG before upload.
+  * Preloading engine (`preloadImages`) caching images before reveal.
+  * Automated background garbage collector running every 15 minutes (`purgeOrphanImages`) removing unreferenced images older than 15 minutes with zero user effort needed.
