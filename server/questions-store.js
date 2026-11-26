@@ -60,4 +60,4 @@ function deleteSet(id) {
   return true;
 }
 
-module.exports = { listSets, getSet, saveSet, deleteSet };
+module.exports = { listSets, getSet, saveSet, deleteSet, readSets };

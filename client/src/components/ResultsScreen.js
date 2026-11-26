@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { playPodium } from '../utils/sound';
 
 function AnimatedScore({ value }) {
   const [display, setDisplay] = useState(0);
@@ -22,6 +23,10 @@ function AnimatedScore({ value }) {
 }
 
 function ResultsScreen({ socket, gameState, pin, setScreen }) {
+  useEffect(() => {
+    playPodium();
+  }, []);
+
   if (!gameState) return null;
   const { podium, all } = gameState;
 

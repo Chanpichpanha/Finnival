@@ -69,11 +69,14 @@
  padding: 16px;
  text-align: center;
  color: var(--indigo);
- box-shadow: var(--shadow-flat);
- transition: transform 0.2s var(--ease-bounce), box-shadow 0.2s var(--ease-bounce);
+ box-shadow: 0 4px 0 var(--indigo-deep);
+ transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 
-.player-card:hover { transform: translateY(-4px) scale(1.02); box-shadow: 0 6px 0 var(--plum); }
+.player-card:hover {
+ transform: translateY(-2px);
+ box-shadow: 0 6px 0 var(--indigo-deep);
+}
 
 .player-avatar {
  font-size: 3rem;

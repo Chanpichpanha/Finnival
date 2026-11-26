@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 title Finnival - Starting...
 color 0A
 cd /d "%~dp0"
@@ -7,6 +7,9 @@ echo ========================================
 echo          FINNIVAL GAME SERVER
 echo ========================================
 echo.
+
+:: Get local IP address for display
+for /f "delims=[] tokens=2" %%a in ('ping -4 -n 1 %COMPUTERNAME% ^| findstr "["') do set LOCAL_IP=%%a
 
 :: Check if node_modules exist, install if needed
 if not exist "server\node_modules" (
@@ -34,13 +37,20 @@ start "Finnival Server" cmd /k "cd /d ""%~dp0server"" && npm start"
 timeout /t 3 /nobreak >nul
 
 echo [4/4] Starting client...
- start "Finnival Client" cmd /k "cd /d ""%~dp0client"" && set PORT=3002 && npm start"
+start "Finnival Client" cmd /k "cd /d ""%~dp0client"" && set ""HOST=0.0.0.0"" && set ""PORT=3002"" && npm start"
 
 echo.
 echo ========================================
 echo   Finnival is starting up!
+echo.
+echo   [On this computer]
 echo   Server: http://localhost:3001
 echo   Client: http://localhost:3002
+echo.
+if defined LOCAL_IP (
+    echo   [On phones/other devices on your WiFi]
+    echo   Client: http://%LOCAL_IP%:3002
+)
 echo ========================================
 echo.
 echo Press any key to close this launcher window...

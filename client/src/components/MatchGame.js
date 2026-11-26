@@ -1,21 +1,31 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 
-export default function MatchGame({ question, submitAnswer, answered, isFrozen, isReveal }) {
+export default function MatchGame({ question, submitAnswer, answered, isFrozen, isReveal, isPaused, isScrambled, oraclePair, scrambleTrigger, onMatchesChange }) {
     
     const [matches, setMatches] = useState({}); // { leftIndex: rightIndex }
+    const matchesRef = useRef(matches);
+    useEffect(() => {
+        matchesRef.current = matches;
+    }, [matches]);
+
     const [activeDragTarget, setActiveDragTarget] = useState(null); // leftIndex being dragged
     const [pointerPos, setPointerPos] = useState(null); // {x, y} for dragging line
+    const [peekedRightIdx, setPeekedRightIdx] = useState(null); // Shell game: single peeked card index
     const containerRef = useRef(null);
     const leftRefs = useRef([]);
     const rightRefs = useRef([]);
     
+    const [lockedLefts, setLockedLefts] = useState(new Set());
     const isComplete = Object.keys(matches).length === (question.pairs?.length || 0);
 
-    // We don't have scrambler logic directly here for rendering order unless passed down,
-    // but typically match questions just display pairs in order, or we can shuffle right side.
-    // Let's implement a stable scramble for the right side so it's not a straight line.
-    const [matchOrder] = useState(() => {
+    useEffect(() => {
+        setMatches({});
+        setLockedLefts(new Set());
+        setPeekedRightIdx(null);
+    }, [question?.text, question?.pairs]);
+
+    const [matchOrder, setMatchOrder] = useState(() => {
         const order = question.pairs?.map((_, i) => i) || [];
         for (let i = order.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
@@ -24,31 +34,120 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
         return order;
     });
 
-    
+    useEffect(() => {
+        if (onMatchesChange) onMatchesChange(matches);
+    }, [matches, onMatchesChange]);
+
+    useEffect(() => {
+        if (!oraclePair) return;
+        const { left, right } = oraclePair;
+        setMatches(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(k => {
+                if (Number(k) === left || next[k] === right) delete next[k];
+            });
+            next[left] = right;
+            return next;
+        });
+        setLockedLefts(prev => new Set([...prev, left]));
+    }, [oraclePair]);
+
+    // Shell Game: Shuffle unmatched right items & cancel active drag line
+    useEffect(() => {
+        if (!scrambleTrigger) return;
+        setActiveDragTarget(null);
+        setPointerPos(null);
+        setPeekedRightIdx(null);
+
+        setMatchOrder(prev => {
+            const currentMatches = matchesRef.current || {};
+            const matchedVals = new Set(Object.values(currentMatches));
+            const unmatchedPos = [];
+            prev.forEach((val, pos) => {
+                if (!matchedVals.has(val)) unmatchedPos.push(pos);
+            });
+            // If fewer than 2 unmatched cards remain, skip shuffle cleanly
+            if (unmatchedPos.length < 2) return prev;
+
+            const newOrder = [...prev];
+            const valsToShuffle = unmatchedPos.map(pos => newOrder[pos]);
+
+            // Guaranteed derangement: every unmatched item must shift to a different slot
+            let shuffled = [...valsToShuffle];
+            let attempts = 0;
+            while (attempts < 20) {
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+                if (shuffled.every((val, idx) => val !== valsToShuffle[idx])) break;
+                attempts++;
+            }
+            if (!shuffled.every((val, idx) => val !== valsToShuffle[idx])) {
+                shuffled = [...valsToShuffle.slice(1), valsToShuffle[0]];
+            }
+
+            unmatchedPos.forEach((pos, idx) => {
+                newOrder[pos] = shuffled[idx];
+            });
+            return newOrder;
+        });
+    }, [scrambleTrigger]);
+
+    // Auto-clear peeked card on pause, un-scramble, answered, frozen, or reveal
+    useEffect(() => {
+        if (!isScrambled || answered || isFrozen || isPaused || isReveal) {
+            setPeekedRightIdx(null);
+        }
+        if (isPaused) {
+            setActiveDragTarget(null);
+            setPointerPos(null);
+        }
+    }, [isScrambled, answered, isFrozen, isPaused, isReveal]);
+
     useEffect(() => {
         const handleGlobalPointerMove = (e) => {
             if (activeDragTarget !== null) {
                 setPointerPos({ x: e.clientX, y: e.clientY });
+
+                // Cross-device hit-test card under pointer during active drag
+                const rightCardEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-right-idx]');
+                if (rightCardEl) {
+                    const hoveredIdx = parseInt(rightCardEl.getAttribute('data-right-idx'), 10);
+                    const isMatched = Object.values(matchesRef.current || {}).includes(hoveredIdx);
+                    if (isScrambled && !isReveal && !isMatched) {
+                        setPeekedRightIdx(hoveredIdx);
+                    } else {
+                        setPeekedRightIdx(null);
+                    }
+                } else if (isScrambled) {
+                    setPeekedRightIdx(null);
+                }
             }
         };
+
         const handleGlobalPointerUp = (e) => {
             if (activeDragTarget === null) return;
             
-            const rightBtn = document.elementFromPoint(e.clientX, e.clientY)?.closest('.match-right-btn');
+            const rightBtn = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-right-idx]');
             if (rightBtn) {
-                const rightIdx = parseInt(rightBtn.getAttribute('data-index'), 10);
-                setMatches(prev => {
-                    const newMatches = { ...prev };
-                    Object.keys(newMatches).forEach(key => {
-                        if (newMatches[key] === rightIdx) delete newMatches[key];
+                const rightIdx = parseInt(rightBtn.getAttribute('data-right-idx'), 10);
+                const isMatched = Object.values(matchesRef.current || {}).includes(rightIdx);
+                if (!isMatched) {
+                    setMatches(prev => {
+                        const newMatches = { ...prev };
+                        Object.keys(newMatches).forEach(key => {
+                            if (newMatches[key] === rightIdx) delete newMatches[key];
+                        });
+                        newMatches[activeDragTarget] = rightIdx;
+                        return newMatches;
                     });
-                    newMatches[activeDragTarget] = rightIdx;
-                    return newMatches;
-                });
+                }
             }
             
             setActiveDragTarget(null);
             setPointerPos(null);
+            setPeekedRightIdx(null);
         };
 
         if (activeDragTarget !== null) {
@@ -59,20 +158,28 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
             window.removeEventListener('pointermove', handleGlobalPointerMove);
             window.removeEventListener('pointerup', handleGlobalPointerUp);
         };
-    }, [activeDragTarget]);
+    }, [activeDragTarget, isScrambled, isReveal]);
 
     const handlePointerDown = (e, leftIdx) => {
-        if (answered || isFrozen || isReveal) return;
+        if (answered || isFrozen || isReveal || isPaused || lockedLefts.has(leftIdx)) return;
         e.target.setPointerCapture(e.pointerId);
         setActiveDragTarget(leftIdx);
         setPointerPos({ x: e.clientX, y: e.clientY });
     };
 
-    
-
     const handleRightClick = (rightIdx) => {
-        if (answered || isFrozen || isReveal) return;
-        
+        if (answered || isFrozen || isReveal || isPaused) return;
+
+        const isMatched = Object.values(matches).includes(rightIdx);
+        if (isMatched) return;
+
+        // In Scramble fog, first tap peeks the card if not already peeked (does NOT connect yet)
+        if (isScrambled && !isReveal && peekedRightIdx !== rightIdx) {
+            setPeekedRightIdx(rightIdx);
+            return;
+        }
+
+        // Second tap on already-peeked card (or when not scrambled), connect if left card is active
         if (activeDragTarget !== null) {
             const newMatches = { ...matches };
             Object.keys(newMatches).forEach(key => {
@@ -81,6 +188,7 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
             newMatches[activeDragTarget] = rightIdx;
             setMatches(newMatches);
             setActiveDragTarget(null);
+            setPeekedRightIdx(null);
         }
     };
 
@@ -132,7 +240,22 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
 
     return (
         <div style={{ padding: 16, background: 'rgba(42,33,66,0.45)', borderRadius: 12 }}>
-            <h3 style={{ color: 'white', textAlign: 'center', marginBottom: 24 }}>Connect the pairs (Drag or Click)</h3>
+            <h3 style={{ color: 'white', textAlign: 'center', marginBottom: 16 }}>Connect the pairs (Drag or Click)</h3>
+            {isScrambled && !isReveal && (
+                <div style={{ 
+                    marginBottom: 16, 
+                    padding: '10px 18px', 
+                    background: 'rgba(237, 116, 63, 0.25)', 
+                    border: '2px solid var(--orange)', 
+                    borderRadius: 12, 
+                    color: '#FFC173', 
+                    fontSize: '1.05rem', 
+                    fontWeight: 'bold',
+                    textAlign: 'center'
+                }}>
+                    🌀 Scramble Storm! Right cards hidden — tap or drag over cards to peek!
+                </div>
+            )}
             
             <div ref={containerRef} style={{ display: 'flex', gap: 60, justifyContent: 'center', position: 'relative', touchAction: 'none' }} >
                 {/* SVG Overlay for Lines */}
@@ -141,6 +264,7 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                         const isCorrect = l.leftIdx === l.rightIdx;
                         const colors = ['#FFAF50', '#ED743F', '#824C97', '#2BA89A'];
                         let lineColor = colors[l.leftIdx % colors.length];
+                        if (lockedLefts.has(l.leftIdx)) lineColor = '#FFAF50';
                         if (isReveal) lineColor = isCorrect ? '#3DBE8B' : '#E5484D';
                         
                         return (
@@ -190,7 +314,7 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                             onDragStart={(e) => e.preventDefault()}
                             draggable={false}
                             onClick={() => {
-                                if (answered || isFrozen || isReveal) return;
+                                if (answered || isFrozen || isReveal || isPaused || lockedLefts.has(i)) return;
                                 setActiveDragTarget(activeDragTarget === i ? null : i); // Toggle click
                             }}
                             style={{ 
@@ -201,7 +325,7 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                                 border: '3px solid var(--indigo-deep)',
                                 boxShadow: '0 4px 0 var(--indigo-deep)',
                                 borderRadius: '12px',
-                                cursor: (answered || isFrozen || isReveal) ? 'not-allowed' : 'grab',
+                                cursor: (answered || isFrozen || isReveal || isPaused || lockedLefts.has(i)) ? 'not-allowed' : 'grab',
                                 transition: 'all 0.2s ease'
                             }}
                         >
@@ -214,28 +338,50 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                     {matchOrder.map((realIndex) => {
                         const p = question.pairs[realIndex];
                         const isMatched = Object.values(matches).includes(realIndex);
+                        const isFogged = isScrambled && !isReveal && !isMatched && peekedRightIdx !== realIndex;
+                        const isPeeked = isScrambled && !isReveal && !isMatched && peekedRightIdx === realIndex;
+
+                        let cardText = p.right;
+                        let cardBg = isMatched ? '#423465' : 'linear-gradient(180deg, #9560AB 0%, var(--plum) 100%)';
+                        let cardBorder = '3px solid var(--indigo-deep)';
+                        let cardShadow = '0 4px 0 var(--indigo-deep)';
+
+                        if (isFogged) {
+                            cardText = '???';
+                            cardBg = 'linear-gradient(180deg, #3B2A59 0%, #241A38 100%)';
+                            cardBorder = '3px dashed #6D5499';
+                        } else if (isPeeked) {
+                            cardBorder = '3px solid #FFAF50';
+                            cardShadow = '0 0 14px rgba(255, 175, 80, 0.6), 0 4px 0 #D48016';
+                        }
+
                         return (
-                            <button 
+                            <motion.button 
                                 key={`right-${realIndex}`}
+                                layout
                                 ref={el => rightRefs.current[realIndex] = el}
                                 className="btn match-right-btn"
                                 data-index={realIndex}
+                                data-right-idx={realIndex}
                                 onClick={() => handleRightClick(realIndex)}
                                 onDragStart={(e) => e.preventDefault()}
                                 draggable={false}
+                                transition={{ layout: { type: 'spring', damping: 22, stiffness: 280 } }}
                                 style={{ 
                                     padding: 16, 
                                     fontSize: '1.1rem', 
-                                    background: isMatched ? '#423465' : 'linear-gradient(180deg, #9560AB 0%, var(--plum) 100%)',
-                                    color: 'white',
-                                    border: '3px solid var(--indigo-deep)',
-                                    boxShadow: '0 4px 0 var(--indigo-deep)',
+                                    background: cardBg,
+                                    color: isFogged ? '#B8A4D9' : 'white',
+                                    letterSpacing: isFogged ? '3px' : 'normal',
+                                    border: cardBorder,
+                                    boxShadow: cardShadow,
                                     borderRadius: '12px',
-                                    transition: 'all 0.2s ease'
+                                    cursor: (answered || isFrozen || isReveal || isPaused || isMatched) ? 'default' : 'pointer',
+                                    transition: 'background 0.2s ease, border 0.2s ease, box-shadow 0.2s ease'
                                 }}
                             >
-                                {p.right}
-                            </button>
+                                {cardText}
+                            </motion.button>
                         );
                     })}
                 </div>
@@ -246,12 +392,16 @@ export default function MatchGame({ question, submitAnswer, answered, isFrozen, 
                     <motion.button 
                         className="btn btn-primary"
                         onClick={handleSubmit}
-                        disabled={!isComplete || answered || isFrozen}
+                        disabled={Object.keys(matches).length === 0 || answered || isFrozen || isPaused}
                         style={{ padding: '16px 32px', fontSize: '1.2rem', fontWeight: 'bold' }}
-                        whileHover={{ scale: isComplete && !answered && !isFrozen ? 1.05 : 1 }}
-                        whileTap={{ scale: isComplete && !answered && !isFrozen ? 0.95 : 1 }}
+                        whileHover={{ scale: Object.keys(matches).length > 0 && !answered && !isFrozen && !isPaused ? 1.05 : 1 }}
+                        whileTap={{ scale: Object.keys(matches).length > 0 && !answered && !isFrozen && !isPaused ? 0.95 : 1 }}
                     >
-                        {answered ? 'Answer Submitted' : 'Submit Matches'}
+                        {answered 
+                            ? 'Answer Submitted' 
+                            : Object.keys(matches).length === (question.pairs?.length || 0)
+                              ? 'Submit All Matches'
+                              : `Submit Matches (${Object.keys(matches).length}/${question.pairs?.length || 0})`}
                     </motion.button>
                 )}
                 {isReveal && (

@@ -1,6 +1,9 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MatchGame from './MatchGame';
+import { resolveImageUrl } from '../utils/imageUrl';
+import { playTick, playSubmit, playFreeze, playHeist, playScramble, playOracle, playDoublePoints } from '../utils/sound';
+
 
 const OPTION_COLORS = ['option-red', 'option-blue', 'option-yellow', 'option-green'];
 
@@ -128,8 +131,24 @@ function AnimatedScore({ value }) {
   return <span className="score-pop">{display}</span>;
 }
 
+
+
+
 function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   const [timeLeft, setTimeLeft] = useState(gameState?.question?.timeLimit || 20);
+  const prevDoublePointsRef = useRef(room?.isDoublePoints);
+  useEffect(() => {
+    if (room?.isDoublePoints && !prevDoublePointsRef.current) {
+      playDoublePoints();
+    }
+    prevDoublePointsRef.current = room?.isDoublePoints;
+  }, [room?.isDoublePoints]);
+
+  const lastTickSecRef = useRef(null);
+  useEffect(() => {
+    lastTickSecRef.current = null;
+  }, [gameState?.questionIndex]);
+
   const [answered, setAnswered] = useState(false);
   const [eliminated, setEliminated] = useState(null);
   const [blindedUntil, setBlindedUntil] = useState(0);
@@ -139,20 +158,47 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   const [selectedOption, setSelectedOption] = useState(null);
   const [shortAnswerText, setShortAnswerText] = useState('');
   const [sliderValue, setSliderValue] = useState(50);
-  const [matchSelection, setMatchSelection] = useState({ left: null, right: null });
-  const [matchAnswers, setMatchAnswers] = useState([]);
-  const [matchOrder, setMatchOrder] = useState([]);
+  const [maskedHint, setMaskedHint] = useState(null);
+  const [sliderSafeRange, setSliderSafeRange] = useState(null);
+  const [oracleMatchPair, setOracleMatchPair] = useState(null);
+  const [matchScrambleTrigger, setMatchScrambleTrigger] = useState(0);
+  const matchPairsRef = useRef({});
 
   const [scrambledUntil, setScrambledUntil] = useState(0);
   const [scrambleMap, setScrambleMap] = useState([0, 1, 2, 3]); // Initialized to default 4
 
   const [cooldownLeft, setCooldownLeft] = useState(0);
+  const [battleFeed, setBattleFeed] = useState([]);
+
+  useEffect(() => {
+    setBattleFeed([]);
+  }, [gameState?.index]);
+
+  useEffect(() => {
+    const handleBattleFeed = (item) => {
+      setBattleFeed((prev) => [item, ...prev].slice(0, 4));
+    };
+    socket.on('battleFeedEvent', handleBattleFeed);
+    return () => socket.off('battleFeedEvent', handleBattleFeed);
+  }, [socket]);
 
   const me = room?.players.find((p) => p.id === playerId);
   const isHost = room?.host?.id === playerId;
+  const isPaused = Boolean(room?.paused || gameState?.pausedAt);
   const powerMeta = me?.power ? POWER_META[me.power] : null;
   const onCooldown = cooldownLeft > 0;
-  const canUsePower = me?.power && !onCooldown && !answered;
+  const canUsePower = me?.power && !onCooldown && !answered && !isPaused;
+
+  const question = gameState?.question;
+  const index = gameState?.index;
+  const total = gameState?.total;
+
+  const isBlind = blindedUntil > Date.now();
+  const isFrozen = frozenUntil > Date.now();
+  const effectiveNow = isPaused && (room?.pausedAt || gameState?.pausedAt)
+    ? (room?.pausedAt || gameState?.pausedAt)
+    : Date.now();
+  const isScrambled = scrambledUntil > effectiveNow && !gameState?.isReveal;
 
   useEffect(() => {
     setAnswered(false);
@@ -162,62 +208,86 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
     setFrozenUntil(me?.frozen ? Date.now() + 5000 : 0);
     setBlindedUntil(0);
     setScrambledUntil(0);
+    setMaskedHint(null);
+    setSliderSafeRange(null);
+    setOracleMatchPair(null);
+    matchPairsRef.current = {};
     const len = gameState?.question?.options?.length || 4;
-      setScrambleMap(Array.from({ length: len }, (_, i) => i));
-      if (gameState?.question?.type === 'match') {
-         const matchLen = gameState?.question?.pairs?.length || 0;
-         let arr = Array.from({length: matchLen}, (_, i) => i);
-         for (let i = matchLen - 1; i > 0; i--) {
-           const j = Math.floor(Math.random() * (i + 1));
-           const temp = arr[i];
-           arr[i] = arr[j];
-           arr[j] = temp;
-         }
-         setMatchOrder(arr);
-      }
+    setScrambleMap(Array.from({ length: len }, (_, i) => i));
+
     setBurst(null);
   }, [gameState?.index]);
 
   useEffect(() => {
-    if (!gameState) return;
-    if (gameState.pausedAt) return;
+    if (!gameState || isPaused) return;
     const interval = setInterval(() => {
       const remaining = Math.max(0, (gameState.endsAt - Date.now()) / 1000);
       setTimeLeft(remaining);
+      // Auto-submit partial match pairs before timer hits zero
+      if (remaining <= 0.8 && !answered && question?.type === 'match') {
+        const current = matchPairsRef.current || {};
+        const payload = Object.entries(current).map(([left, right]) => ({
+          left: parseInt(left, 10),
+          right: parseInt(right, 10)
+        }));
+        if (payload.length > 0) {
+          submitAnswer(payload);
+        }
+      }
     }, 100);
     return () => clearInterval(interval);
-  }, [gameState]);
+  }, [gameState, isPaused, answered, question?.type]);
+
+  const pausedAtRef = useRef(null);
+  useEffect(() => {
+    if (isPaused) {
+      document.activeElement?.blur();
+      setPickingTarget(false);
+      pausedAtRef.current = Date.now();
+    } else if (pausedAtRef.current) {
+      const dur = Date.now() - pausedAtRef.current;
+      pausedAtRef.current = null;
+      if (scrambledUntil > 0) setScrambledUntil((prev) => prev + dur);
+      if (blindedUntil > 0) setBlindedUntil((prev) => prev + dur);
+      if (frozenUntil > 0) setFrozenUntil((prev) => prev + dur);
+    }
+  }, [isPaused]);
 
   useEffect(() => {
     const handlePowerEffect = (effect) => {
-      if (effect.type === 'hint') setEliminated(effect.eliminate);
+      if (effect.type === 'hint') {
+        if (!effect.qType || effect.qType === 'classic') setEliminated(effect.eliminate);
+        if (effect.qType === 'short_answer') setMaskedHint(effect.masked);
+        if (effect.qType === 'slider') setSliderSafeRange({ safeMin: effect.safeMin, safeMax: effect.safeMax });
+        if (effect.qType === 'match') setOracleMatchPair({ questionIndex: gameState?.index, autoPair: effect.autoPair });
+      }
       if (effect.type === 'blind') setBlindedUntil(Date.now() + effect.duration);
       if (effect.type === 'frozen') setFrozenUntil(Date.now() + (effect.duration || 5000));
       if (effect.type === 'scramble') {
-        setScrambledUntil(Date.now() + (effect.duration || 15000));
-        let valid = false;
-        
-        const numOpts = gameState?.question?.options?.length || 4;
-        let arr = Array.from({ length: numOpts }, (_, i) => i);
-        valid = false;
-        while (!valid && numOpts > 1) {
-          arr = Array.from({ length: numOpts }, (_, i) => i);
-          for (let i = numOpts - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            const temp = arr[i];
-            arr[i] = arr[j];
-            arr[j] = temp;
+        setScrambledUntil(Date.now() + (effect.duration || 10000));
+        setMatchScrambleTrigger(Date.now());
+        if (!effect.qType || effect.qType === 'classic') {
+          let valid = false;
+          const numOpts = gameState?.question?.options?.length || 4;
+          let arr = Array.from({ length: numOpts }, (_, i) => i);
+          while (!valid && numOpts > 1) {
+            arr = Array.from({ length: numOpts }, (_, i) => i);
+            for (let i = numOpts - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              const temp = arr[i];
+              arr[i] = arr[j];
+              arr[j] = temp;
+            }
+            valid = arr.every((val, i) => val !== i);
           }
-          valid = arr.every((val, i) => val !== i);
+          setScrambleMap(arr);
         }
-        setScrambleMap(arr);
-
       }
       setBurst(effect);
     };
     socket.on('powerEffect', handlePowerEffect);
     return () => socket.off('powerEffect', handlePowerEffect);
-  }, [socket]);
+  }, [socket, gameState?.index]);
 
   useEffect(() => {
     if (!blindedUntil) return;
@@ -232,33 +302,48 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   }, [frozenUntil]);
 
   useEffect(() => {
+    if (!scrambledUntil || isPaused) return;
+    const t = setTimeout(() => setScrambledUntil(0), Math.max(0, scrambledUntil - Date.now()));
+    return () => clearTimeout(t);
+  }, [scrambledUntil, isPaused]);
+
+  useEffect(() => {
     const update = () => {
-      const remaining = Math.max(0, (me?.powerCooldownUntil || 0) - Date.now());
+      const effectiveNow = isPaused && (room?.pausedAt || gameState?.pausedAt)
+        ? (room?.pausedAt || gameState?.pausedAt)
+        : Date.now();
+      const remaining = Math.max(0, (me?.powerCooldownUntil || 0) - effectiveNow);
       setCooldownLeft(remaining);
     };
     update();
     const interval = setInterval(update, 250);
     return () => clearInterval(interval);
-  }, [me?.powerCooldownUntil]);
+  }, [me?.powerCooldownUntil, isPaused, room?.pausedAt, gameState?.pausedAt]);
 
   const submitAnswer = (index) => {
-    if (answered || isFrozen) return;
+    if (answered || isFrozen || isPaused) return;
+    playSubmit();
     setAnswered(true);
     setSelectedOption(index);
-    const finalAnswer = isScrambled ? scrambleMap[index] : index;
-    socket.emit('submitAnswer', { answerIndex: finalAnswer, clientTime: gameState.startedAt });
+    const finalAnswer = (isScrambled && typeof index === 'number') ? scrambleMap[index] : index;
+    socket.emit('submitAnswer', { answerIndex: finalAnswer, clientTime: gameState?.startedAt });
   };
 
   const activatePower = () => {
-    if (!me?.power) return;
-    if (powerMeta.needsTarget) {
+    if (!me?.power || isPaused) return;
+    if (powerMeta?.needsTarget) {
       setPickingTarget(true);
+      return;
+    }
+    if (me?.power === 'hint' && question?.type === 'match') {
+      socket.emit('usePower', { currentPairs: matchPairsRef.current });
       return;
     }
     socket.emit('usePower', {});
   };
 
   const activateOnTarget = (targetId) => {
+    if (isPaused) return;
     socket.emit('usePower', { targetId });
     setPickingTarget(false);
   };
@@ -268,17 +353,8 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   const banPlayer = (targetId) => socket.emit('banPlayer', { playerId: targetId });
   const kickPlayer = (targetId) => socket.emit('kickPlayer', { playerId: targetId });
 
-  if (!gameState) return null;
-  const { question, index, total } = gameState;
-  const isBlind = blindedUntil > Date.now();
-  const isFrozen = frozenUntil > Date.now();
-  useEffect(() => {
-    if (!scrambledUntil) return;
-    const t = setTimeout(() => setScrambledUntil(0), Math.max(0, scrambledUntil - Date.now()));
-    return () => clearTimeout(t);
-  }, [scrambledUntil]);
+  if (!gameState || !question) return null;
 
-  const isScrambled = scrambledUntil > Date.now() && !gameState?.isReveal;
   const rivals = room?.players.filter((p) => p.id !== playerId) || [];
   const isUrgent = timeLeft <= 3 && timeLeft > 0;
   const contestants = room?.players.filter((p) => !p.isHost) || [];
@@ -292,17 +368,56 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
           </span>
         </div>
 
-        <div className={`timer-bar ${room?.paused ? '' : isUrgent ? 'urgent' : ''}`}>
+        {/* Phase 1 SFX hook connected: playDoublePoints() fires via room.isDoublePoints */}
+        {room?.isDoublePoints && (
+          <motion.div
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            style={{
+              margin: '0 auto 12px auto',
+              padding: '8px 18px',
+              background: 'linear-gradient(135deg, #FF6B35 0%, #FFAF50 100%)',
+              borderRadius: 12,
+              color: 'white',
+              fontWeight: 900,
+              fontSize: '1.15rem',
+              textAlign: 'center',
+              boxShadow: '0 0 20px rgba(255, 107, 53, 0.6), 0 3px 0 #D4541B',
+              letterSpacing: '1px',
+              maxWidth: 420
+            }}
+          >
+            🔥 2× POINTS ACTIVATED!
+          </motion.div>
+        )}
+        <div className={`timer-bar ${isPaused ? '' : isUrgent ? 'urgent' : ''}`}>
           <motion.div
             className={`timer-fill ${isUrgent ? 'urgent' : ''}`}
-            animate={{ width: room?.paused ? undefined : `${(timeLeft / question.timeLimit) * 100}%` }}
-            transition={{ duration: 0.1, ease: 'linear' }}
+            animate={{ width: `${Math.min(100, Math.max(0, (timeLeft / (question.timeLimit || 20)) * 100))}%` }}
+            transition={{ duration: isPaused ? 0 : 0.1, ease: 'linear' }}
           />
         </div>
 
         <div className="card" style={{ marginBottom: 16 }}>
           <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: 4 }}>Current question (read-only)</p>
             <div className="question-text" style={{ fontSize: '1.1rem' }}>{question.text}</div>
+            {(question.imageUrl || question.image) && (
+              <div style={{ textAlign: 'center', marginTop: 12, marginBottom: 8 }}>
+                <img
+                  src={resolveImageUrl(question.imageUrl || question.image)}
+                  alt=""
+                  style={{
+                    maxHeight: '170px',
+                    maxWidth: '100%',
+                    width: 'auto',
+                    borderRadius: 10,
+                    objectFit: 'contain',
+                    border: '2px solid var(--indigo-deep)',
+                    boxShadow: '0 3px 0 var(--indigo-deep)'
+                  }}
+                />
+              </div>
+            )}
             
             {(!question.type || question.type === 'classic') && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
@@ -349,6 +464,28 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
           </div>
 
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          <motion.button
+            className={`btn ${room?.isDoublePoints ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => socket.emit('activateDoublePoints')}
+            disabled={Boolean(room?.isDoublePoints || isPaused)}
+            whileHover={{ scale: room?.isDoublePoints || isPaused ? 1 : 1.03 }}
+            whileTap={{ scale: room?.isDoublePoints || isPaused ? 1 : 0.97 }}
+            style={{
+              flex: 1,
+              minWidth: 160,
+              background: room?.isDoublePoints
+                ? 'linear-gradient(135deg, #FF6B35 0%, #FFAF50 100%)'
+                : undefined,
+              boxShadow: room?.isDoublePoints
+                ? '0 0 16px rgba(255, 107, 53, 0.7), 0 4px 0 #D4541B'
+                : undefined,
+              color: 'white',
+              fontWeight: 800,
+              cursor: room?.isDoublePoints || isPaused ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {room?.isDoublePoints ? '🔥 2× ACTIVE' : '🔥 2× Points'}
+          </motion.button>
           <motion.button
             className="btn btn-secondary"
             onClick={togglePause}
@@ -454,7 +591,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
           <motion.button
             className="power-action-btn"
             onClick={activatePower}
-            disabled={!canUsePower}
+            disabled={!canUsePower || isPaused}
             animate={canUsePower ? { boxShadow: ['0 0 4px rgba(130,76,151,0.4)', '0 0 16px rgba(130,76,151,0.9)', '0 0 4px rgba(130,76,151,0.4)'] } : {}}
             transition={canUsePower ? { duration: 1.8, repeat: Infinity, ease: 'easeInOut' } : {}}
           >
@@ -490,17 +627,54 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
         )}
       </AnimatePresence>
 
-      <div className={`timer-bar ${isUrgent ? 'urgent' : ''}`}>
+      <div className={`timer-bar ${isPaused ? '' : isUrgent ? 'urgent' : ''}`}>
         <motion.div
           className={`timer-fill ${isUrgent ? 'urgent' : ''}`}
-          animate={{ width: `${(timeLeft / question.timeLimit) * 100}%` }}
-          transition={{ duration: 0.1, ease: 'linear' }}
+          animate={{ width: `${Math.min(100, Math.max(0, (timeLeft / (question.timeLimit || 20)) * 100))}%` }}
+          transition={{ duration: isPaused ? 0 : 0.1, ease: 'linear' }}
         />
       </div>
 
-      <div className="question-card">
-        {question.image && (
-          <img src={question.image} alt="" style={{ width: '100%', borderRadius: 12, marginBottom: 16 }} />
+      <div className="question-card" style={{ position: 'relative', overflow: 'hidden' }}>
+        {isPaused && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backdropFilter: 'blur(14px)',
+              WebkitBackdropFilter: 'blur(14px)',
+              backgroundColor: 'rgba(26, 16, 60, 0.82)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 'var(--radius-lg)',
+              zIndex: 30,
+              padding: 24,
+              textAlign: 'center',
+              border: '2px solid rgba(255, 255, 255, 0.2)'
+            }}
+          >
+            <div style={{ fontSize: '3.5rem', marginBottom: 12 }}>⏸️</div>
+            <h2 style={{ color: 'white', margin: 0, fontSize: '1.9rem', fontWeight: 800 }}>Game Paused by Host</h2>
+          </div>
+        )}
+        {(question.imageUrl || question.image) && (
+          <div style={{ textAlign: 'center', marginBottom: 16 }}>
+            <img
+              src={resolveImageUrl(question.imageUrl || question.image)}
+              alt=""
+              style={{
+                maxHeight: '180px',
+                maxWidth: '100%',
+                width: 'auto',
+                borderRadius: 12,
+                objectFit: 'contain',
+                border: '2px solid var(--indigo-deep)',
+                boxShadow: '0 4px 0 var(--indigo-deep)'
+              }}
+            />
+          </div>
         )}
         <div className="question-text">{question.text}</div>
 
@@ -516,7 +690,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                   key={i}
                   className={`option-btn ${cssClass}`}
                   onClick={() => submitAnswer(i)}
-                  disabled={answered || eliminated?.includes(i) || isFrozen}
+                  disabled={answered || eliminated?.includes(i) || isFrozen || isPaused}
                   style={{ 
                       ...customStyle, 
                       opacity: gameState?.isReveal 
@@ -531,8 +705,8 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                     scale: gameState?.isReveal && gameState.correctAnswer === i ? 1.02 : (selectedOption === i ? [1, 1.12, 1.04] : 1)
                   }}
                   transition={gameState?.isReveal && gameState.correctAnswer === i ? { duration: 1.2, ease: [0.34, 1.56, 0.64, 1] } : { delay: i * 0.05, type: 'spring', stiffness: 300, damping: 22 }}
-                  whileHover={!answered && !eliminated?.includes(i) && !isFrozen ? { scale: 1.04, rotate: i % 2 === 0 ? -1.5 : 1.5, y: -4 } : {}}
-                  whileTap={!answered && !eliminated?.includes(i) && !isFrozen ? { scale: 0.96, rotate: 0 } : {}}
+                  whileHover={!answered && !eliminated?.includes(i) && !isFrozen && !isPaused ? { scale: 1.04, rotate: i % 2 === 0 ? -1.5 : 1.5, y: -4 } : {}}
+                  whileTap={!answered && !eliminated?.includes(i) && !isFrozen && !isPaused ? { scale: 0.96, rotate: 0 } : {}}
                 >
                   {String.fromCharCode(65 + i)}. {opt}
                 </motion.button>
@@ -562,14 +736,43 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
 
             return (
             <div style={{ padding: 24, textAlign: 'center', background: 'rgba(42,33,66,0.45)', borderRadius: 12 }}>
-              <h3 style={{ color: 'white', marginBottom: 24 }}>Type your answer:</h3>
+              <h3 style={{ color: 'white', marginBottom: 16 }}>Type your answer:</h3>
+              {maskedHint && !isReveal && (
+                <div style={{ 
+                  marginBottom: 16, 
+                  padding: '10px 18px', 
+                  background: 'rgba(130, 76, 151, 0.35)', 
+                  border: '2px solid #FFAF50', 
+                  borderRadius: 10, 
+                  color: 'white', 
+                  fontSize: '1.25rem', 
+                  letterSpacing: 3, 
+                  fontWeight: 'bold' 
+                }}>
+                  🔮 Oracle Hint: <span style={{ color: '#FFAF50' }}>{maskedHint}</span>
+                </div>
+              )}
+              {isScrambled && !isReveal && (
+                <div style={{ 
+                  marginBottom: 16, 
+                  padding: '8px 16px', 
+                  background: 'rgba(237, 116, 63, 0.3)', 
+                  border: '2px solid var(--orange)', 
+                  borderRadius: 10, 
+                  color: '#FFC173', 
+                  fontSize: '1.1rem', 
+                  fontWeight: 'bold' 
+                }}>
+                  🌀 Scrambled! Blind Typing Active!
+                </div>
+              )}
               <input 
-                type="text" 
+                type={isScrambled && !isReveal ? 'password' : 'text'} 
                 className="input" 
-                placeholder="Your answer..."
+                placeholder={isScrambled && !isReveal ? 'Typing blind...' : 'Your answer...'}
                 value={shortAnswerText}
                 onChange={(e) => setShortAnswerText(e.target.value)}
-                disabled={answered || isFrozen || isReveal}
+                disabled={answered || isFrozen || isReveal || isPaused}
                 style={{ 
                     width: '100%', 
                     maxWidth: 400, 
@@ -578,7 +781,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                     textAlign: 'center',
                     backgroundColor: inputBg,
                     color: inputColor,
-                    border: '4px solid var(--indigo-deep)',
+                    border: isScrambled && !isReveal ? '4px solid var(--orange)' : '4px solid var(--indigo-deep)',
                     boxShadow: '0 4px 0 var(--indigo-deep)',
                     transition: 'all 0.3s ease',
                     fontWeight: 'bold', fontFamily: "'Fredoka One', cursive"
@@ -588,7 +791,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
               {!isReveal && (
               <button 
                 className="btn btn-primary" 
-                disabled={answered || isFrozen || !shortAnswerText.trim()}
+                disabled={answered || isFrozen || !shortAnswerText.trim() || isPaused}
                 onClick={() => submitAnswer(shortAnswerText.trim())}
                 style={{ width: '100%', maxWidth: 400, fontSize: '1.2rem', padding: '16px' }}
               >
@@ -621,24 +824,55 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
 
         {question.type === 'slider' && (
           <div style={{ padding: 24, textAlign: 'center', background: 'rgba(42,33,66,0.45)', borderRadius: 12 }}>
-            <h3 style={{ color: 'white', marginBottom: 24 }}>Drag to select:</h3>
-            <div style={{ fontSize: '3rem', marginBottom: 24, color: 'white', fontWeight: 'bold' }}>{sliderValue}</div>
+            <h3 style={{ color: 'white', marginBottom: 16 }}>Drag to select:</h3>
+            {sliderSafeRange && !gameState?.isReveal && (
+              <div style={{ 
+                marginBottom: 16, 
+                padding: '10px 18px', 
+                background: 'rgba(130, 76, 151, 0.35)', 
+                border: '2px solid #FFAF50', 
+                borderRadius: 10, 
+                color: 'white', 
+                fontSize: '1.1rem', 
+                fontWeight: 'bold' 
+              }}>
+                🔮 Oracle Hint: Target is within <span style={{ color: '#FFAF50' }}>{sliderSafeRange.safeMin} – {sliderSafeRange.safeMax}</span>
+              </div>
+            )}
+            {isScrambled && !gameState?.isReveal && (
+              <div style={{ 
+                marginBottom: 16, 
+                padding: '8px 16px', 
+                background: 'rgba(237, 116, 63, 0.3)', 
+                border: '2px solid var(--orange)', 
+                borderRadius: 10, 
+                color: '#FFC173', 
+                fontSize: '1.1rem', 
+                fontWeight: 'bold' 
+              }}>
+                🌀 Foggy Gauge! Values Hidden!
+              </div>
+            )}
+            <div style={{ fontSize: '3rem', marginBottom: 24, color: 'white', fontWeight: 'bold' }}>
+              {isScrambled && !gameState?.isReveal ? '???' : sliderValue}
+            </div>
             <input 
                 type="range" 
                 min={question.min} 
                 max={question.max} 
                 value={sliderValue}
                 onChange={(e) => setSliderValue(Number(e.target.value))}
-                disabled={answered || isFrozen || gameState?.isReveal}
+                disabled={answered || isFrozen || gameState?.isReveal || isPaused}
                 className="custom-slider"
                 style={{ width: '100%', maxWidth: 600, marginBottom: 12 }}
               />
             <div style={{ display: 'flex', justifyContent: 'space-between', maxWidth: 600, margin: '0 auto 32px auto', color: 'var(--amber-tint)', fontWeight: 'bold', fontSize: '1.2rem' }}>
-               <span>{question.min}</span><span>{question.max}</span>
+               <span>{isScrambled && !gameState?.isReveal ? '?' : question.min}</span>
+               <span>{isScrambled && !gameState?.isReveal ? '?' : question.max}</span>
             </div>
             <button 
               className="btn btn-primary" 
-              disabled={answered || isFrozen || gameState?.isReveal}
+              disabled={answered || isFrozen || gameState?.isReveal || isPaused}
               onClick={() => submitAnswer(sliderValue)}
               style={{ width: '100%', maxWidth: 400, fontSize: '1.2rem', padding: '16px' }}
             >
@@ -666,13 +900,17 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
 
         {question.type === 'match' && (
           <MatchGame 
+             key={gameState?.index}
              question={question} 
-             matchOrder={matchOrder} 
              answered={answered} 
              isFrozen={isFrozen} 
              isReveal={gameState?.isReveal} 
-              gameState={gameState} 
-              submitAnswer={submitAnswer} 
+             isPaused={isPaused}
+             isScrambled={isScrambled}
+             oraclePair={oracleMatchPair && oracleMatchPair.questionIndex === gameState?.index ? oracleMatchPair.autoPair : null}
+             scrambleTrigger={matchScrambleTrigger}
+             onMatchesChange={(m) => { matchPairsRef.current = m; }}
+             submitAnswer={submitAnswer} 
             />
           )}
       </div>

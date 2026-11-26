@@ -4,6 +4,37 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Finnival</title>
+  <script>
+    // Suppress third-party browser extension & mobile injected script errors
+    // (e.g. Brave iOS crypto wallet, Firefox iOS reader, extension scripts)
+    window.addEventListener('error', function (e) {
+      var msg = (e && e.message) ? String(e.message) : '';
+      var filename = (e && e.filename) ? String(e.filename) : '';
+      if (
+        msg.indexOf('__firefox__') !== -1 ||
+        msg.indexOf('ethereum') !== -1 ||
+        msg.indexOf('refresh_youtube_quality') !== -1 ||
+        msg.indexOf('selectedAddress') !== -1 ||
+        filename.indexOf('extension') !== -1
+      ) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        return true;
+      }
+    }, true);
+
+    window.addEventListener('unhandledrejection', function (e) {
+      var msg = (e && e.reason && e.reason.message) ? String(e.reason.message) : '';
+      if (
+        msg.indexOf('__firefox__') !== -1 ||
+        msg.indexOf('ethereum') !== -1 ||
+        msg.indexOf('selectedAddress') !== -1
+      ) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+    }, true);
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">

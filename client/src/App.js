@@ -7,6 +7,8 @@ import GameScreen from './components/GameScreen';
 import LeaderboardScreen from './components/LeaderboardScreen';
 import ResultsScreen from './components/ResultsScreen';
 import Toast from './components/Toast';
+import { preloadImages } from './utils/imageUrl';
+import { isMuted, toggleMute } from './utils/sound';
 import './App.css';
 
 const SERVER_PORT = 3001;
@@ -30,37 +32,53 @@ function App() {
   const [gameState, setGameState] = useState(null);
   const [answerCount, setAnswerCount] = useState(null);
   const [connectionLost, setConnectionLost] = useState(false);
+  const [muted, setLocalMuted] = useState(isMuted());
+
+  useEffect(() => {
+    const onMuteChange = (e) => setLocalMuted(e.detail.muted);
+    window.addEventListener('finnival_mute_change', onMuteChange);
+    return () => window.removeEventListener('finnival_mute_change', onMuteChange);
+  }, []);
 
   useEffect(() => {
     socket.on('connect', () => {
       setConnectionLost(false);
       const savedPin = sessionStorage.getItem('finnival-pin');
-      const savedPlayerId = sessionStorage.getItem('finnival-playerId');
+      const savedToken = sessionStorage.getItem('finnival-sessionToken') || sessionStorage.getItem('finnival-playerId');
 
-      if (savedPin && savedPlayerId) {
-        socket.emit('rejoinRoom', { pin: savedPin, playerId: savedPlayerId }, (res) => {
+      if (savedPin && savedToken) {
+        socket.emit('rejoinRoom', { pin: savedPin, sessionToken: savedToken, playerId: savedToken }, (res) => {
           if (res.ok) {
             setPin(savedPin);
             setPlayerId(socket.id);
+            if (res.sessionToken) {
+              sessionStorage.setItem('finnival-sessionToken', res.sessionToken);
+            }
             setRoom(res.snapshot);
             const stateToScreen = { lobby: 'lobby', powerSelect: 'powerSelect', leaderboard: 'leaderboard', results: 'results' };
             setScreen(stateToScreen[res.snapshot.state] || 'game');
-              if (res.snapshot.state === 'question' || res.snapshot.state === 'reveal') {
-                const qIndex = res.snapshot.questionIndex;
-                setGameState({
-                  index: qIndex,
-                  question: res.snapshot.questions[qIndex],
-                  total: res.snapshot.totalQuestions,
-                  startedAt: res.snapshot.startedAt || Date.now(),
-                  endsAt: res.snapshot.endsAt,
-                  isReveal: res.snapshot.state === 'reveal',
-                  correctAnswer: res.snapshot.state === 'reveal' ? res.snapshot.questions[qIndex]?.correctAnswer : undefined
-                });
-              }
+
+            if (res.snapshot.state === 'question' || res.snapshot.state === 'reveal') {
+              const qIndex = res.snapshot.questionIndex;
+              const activeQ = res.activeQuestion || res.snapshot.questions[qIndex];
+              setGameState({
+                index: qIndex,
+                question: activeQ,
+                total: res.snapshot.totalQuestions,
+                startedAt: res.startedAt || Date.now(),
+                endsAt: res.endsAt || (Date.now() + (activeQ?.timeLimit || 20) * 1000),
+                pausedAt: res.pausedAt || null,
+                isReveal: res.snapshot.state === 'reveal',
+                hasSubmitted: res.hasSubmitted,
+                correctAnswer: res.snapshot.state === 'reveal' ? res.snapshot.questions[qIndex]?.correctAnswer : undefined
+              });
+            }
           } else {
             sessionStorage.removeItem('finnival-pin');
+            sessionStorage.removeItem('finnival-sessionToken');
             sessionStorage.removeItem('finnival-playerId');
             setPlayerId(socket.id);
+            setScreen('home');
           }
         });
       } else {
@@ -70,6 +88,9 @@ function App() {
 
     socket.on('roomUpdate', (snapshot) => {
       setRoom(snapshot);
+      if (snapshot?.questions) {
+        preloadImages(snapshot.questions);
+      }
     });
 
     socket.on('toast', (msg) => {
@@ -85,18 +106,21 @@ function App() {
       setGameState(data);
       setAnswerCount(null);
       setScreen('game');
+      if (data?.question) {
+        preloadImages([data.question]);
+      }
     });
 
     socket.on('answerCount', (data) => {
       setAnswerCount(data);
     });
 
-    socket.on('timerPaused', () => {
-      setGameState((prev) => (prev ? { ...prev, pausedAt: Date.now() } : prev));
+    socket.on('timerPaused', (data) => {
+      setGameState((prev) => (prev ? { ...prev, pausedAt: Date.now(), remainingMs: data?.remainingMs } : prev));
     });
 
     socket.on('timerResumed', (data) => {
-      setGameState((prev) => (prev ? { ...prev, endsAt: data.endsAt, pausedAt: null } : prev));
+      setGameState((prev) => (prev ? { ...prev, endsAt: data.endsAt, startedAt: data.startedAt || prev.startedAt, pausedAt: null } : prev));
     });
 
     socket.on('answerReveal', (data) => {
@@ -120,15 +144,31 @@ function App() {
 
     socket.on('hostLeft', () => {
       sessionStorage.removeItem('finnival-pin');
+      sessionStorage.removeItem('finnival-sessionToken');
       sessionStorage.removeItem('finnival-playerId');
       alert('The host has left. The game is ending.');
+      setRoom(null);
+      setGameState(null);
+      setScreen('home');
+    });
+
+    socket.on('roomClosed', (data) => {
+      sessionStorage.removeItem('finnival-pin');
+      sessionStorage.removeItem('finnival-sessionToken');
+      sessionStorage.removeItem('finnival-playerId');
+      alert(data?.message || 'The host has closed the lobby.');
+      setRoom(null);
+      setGameState(null);
       setScreen('home');
     });
 
     socket.on('kicked', () => {
       sessionStorage.removeItem('finnival-pin');
+      sessionStorage.removeItem('finnival-sessionToken');
       sessionStorage.removeItem('finnival-playerId');
       alert('You have been removed from the game.');
+      setRoom(null);
+      setGameState(null);
       setScreen('home');
     });
 
@@ -154,6 +194,7 @@ function App() {
       socket.off('gameOver');
       socket.off('backToLobby');
       socket.off('hostLeft');
+      socket.off('roomClosed');
       socket.off('kicked');
       socket.off('disconnect');
       socket.off('connect_error');
@@ -163,7 +204,7 @@ function App() {
   const renderScreen = () => {
     switch (screen) {
       case 'home':
-        return <HomeScreen socket={socket} setScreen={setScreen} setPin={setPin} setPlayerId={setPlayerId} />;
+        return <HomeScreen socket={socket} setScreen={setScreen} setPin={setPin} setPlayerId={setPlayerId} setRoom={setRoom} />;
       case 'lobby':
         return <LobbyScreen socket={socket} room={room} pin={pin} playerId={playerId} setScreen={setScreen} />;
       case 'powerSelect':
@@ -175,12 +216,37 @@ function App() {
       case 'results':
         return <ResultsScreen socket={socket} gameState={gameState} pin={pin} setScreen={setScreen} />;
       default:
-        return <HomeScreen socket={socket} setScreen={setScreen} setPin={setPin} setPlayerId={setPlayerId} />;
+        return <HomeScreen socket={socket} setScreen={setScreen} setPin={setPin} setPlayerId={setPlayerId} setRoom={setRoom} />;
     }
   };
 
   return (
     <div className="App">
+      <button
+        type="button"
+        onClick={() => setLocalMuted(toggleMute())}
+        className="btn btn-secondary"
+        style={{
+          position: 'fixed',
+          top: 14,
+          right: 14,
+          zIndex: 9999,
+          padding: '6px 12px',
+          borderRadius: '999px',
+          fontSize: '0.9rem',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'rgba(30, 24, 53, 0.85)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          cursor: 'pointer'
+        }}
+        title={muted ? 'Unmute Sound' : 'Mute Sound'}
+      >
+        <span>{muted ? '🔇 Muted' : '🔊 Sound'}</span>
+      </button>
       <AnimatePresence>
         {connectionLost && (
           <motion.div
@@ -213,7 +279,7 @@ function App() {
   );
 }
 
-function HomeScreen({ socket, setScreen, setPin, setPlayerId }) {
+function HomeScreen({ socket, setScreen, setPin, setPlayerId, setRoom }) {
   const [mode, setMode] = useState(null);
   const [name, setName] = useState('');
   const [gameName, setGameName] = useState('');
@@ -221,14 +287,29 @@ function HomeScreen({ socket, setScreen, setPin, setPlayerId }) {
   const avatars = ['🦊', '🐼', '🦁', '🐯', '🐨', '🐸', '🦄', '🐙'];
   const [avatar, setAvatar] = useState(avatars[0]);
 
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const pinParam = params.get('pin');
+      if (pinParam && /^\d{6}$/.test(pinParam.trim())) {
+        setJoinPin(pinParam.trim());
+        setMode('join');
+        const cleanUrl = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+    } catch (e) {}
+  }, []);
+
   const handleCreate = () => {
     if (!gameName.trim()) return;
     socket.emit('createRoom', { gameName }, (res) => {
       if (res.ok) {
         sessionStorage.setItem('finnival-pin', res.pin);
+        if (res.sessionToken) sessionStorage.setItem('finnival-sessionToken', res.sessionToken);
         sessionStorage.setItem('finnival-playerId', socket.id);
         setPlayerId(socket.id);
         setPin(res.pin);
+        if (typeof setRoom === 'function' && res.snapshot) setRoom(res.snapshot);
         setScreen('lobby');
       }
     });
@@ -239,9 +320,11 @@ function HomeScreen({ socket, setScreen, setPin, setPlayerId }) {
     socket.emit('joinRoom', { pin: joinPin, playerName: name, avatar }, (res) => {
       if (res.ok) {
         sessionStorage.setItem('finnival-pin', res.pin);
+        if (res.sessionToken) sessionStorage.setItem('finnival-sessionToken', res.sessionToken);
         sessionStorage.setItem('finnival-playerId', socket.id);
         setPlayerId(socket.id);
         setPin(res.pin);
+        if (typeof setRoom === 'function' && res.snapshot) setRoom(res.snapshot);
         setScreen('lobby');
       } else {
         alert(res.message);
