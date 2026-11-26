@@ -1294,6 +1294,15 @@ server.listen(PORT, '0.0.0.0', () => {
   if (startupPurge.deletedCount > 0) {
     console.log(`Startup orphan check: cleaned ${startupPurge.deletedCount} unused images (${startupPurge.mbFreed} MB freed)`);
   }
+
+  // Automatically sweep and purge unreferenced uploaded images older than 15 minutes
+  setInterval(() => {
+    const sweep = purgeOrphanImages(rooms);
+    if (sweep.deletedCount > 0) {
+      console.log(`[Auto-Purge] Cleaned ${sweep.deletedCount} unused images (${sweep.mbFreed} MB freed)`);
+    }
+  }, 15 * 60 * 1000);
+
   const nets = require('os').networkInterfaces();
   let lanIP = 'localhost';
   for (const iface of Object.values(nets)) {

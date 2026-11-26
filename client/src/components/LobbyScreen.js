@@ -14,7 +14,6 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
  const [customTimeInput, setCustomTimeInput] = useState('20');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const [purgingImages, setPurgingImages] = useState(false);
   const [chatMessages, setChatMessages] = useState(room?.chatMessages || []);
   const [chatInput, setChatInput] = useState('');
   const [emojiCooldown, setEmojiCooldown] = useState(0);
@@ -135,29 +134,6 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
     if (emojiCooldown > 0) return;
     setEmojiCooldown(5);
     socket.emit('sendLobbyReaction', { emoji });
-  };
-
-  const handlePurgeImages = async () => {
-    try {
-      setPurgingImages(true);
-      const res = await fetch(`${serverUrl}/api/purge-unused-images`, {
-        method: 'POST'
-      });
-      const data = await res.json();
-      if (data.ok) {
-        if (data.deletedCount > 0) {
-          alert(`Storage Cleaned! Removed ${data.deletedCount} unused images (${data.mbFreed} MB freed).`);
-        } else {
-          alert('Storage is already clean! No unused images found.');
-        }
-      } else {
-        alert('Could not clean storage.');
-      }
-    } catch (err) {
-      alert('Failed to clean storage.');
-    } finally {
-      setPurgingImages(false);
-    }
   };
 
   const refreshSets = () => {
@@ -537,17 +513,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
  <div style={{ marginTop: 40 }}>
  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
     <h2 style={{ color: 'white', margin: 0 }}>Saved Question Sets</h2>
-    <button
-      type="button"
-      className="btn btn-secondary"
-      style={{ padding: '6px 14px', fontSize: '0.85rem' }}
-      onClick={handlePurgeImages}
-      disabled={purgingImages}
-      title="Clean up unreferenced uploaded images from the server"
-    >
-      {purgingImages ? '🧹 Cleaning Storage...' : '🧹 Clean Storage'}
-    </button>
-  </div>
+ </div>
  <div className="card" style={{ marginBottom: 24 }}>
  {savedSets.length === 0 ? (
  <p style={{ color: 'var(--muted)' }}>No saved sets yet. Add questions below, then save them for next time.</p>
