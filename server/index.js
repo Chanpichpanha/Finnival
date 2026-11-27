@@ -7,7 +7,74 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
+const { clerkMiddleware, getAuth, verifyToken } = require('@clerk/express');
 const questionsStore = require('./questions-store');
+const aiGenerator = require('./ai-quiz-generator');
+
+aiGenerator.initEnv();
+
+const rawOrigins = String(process.env.CLIENT_ORIGIN || '').trim();
+const allowedOrigins = rawOrigins
+  ? rawOrigins.split(',').map((o) => o.trim()).filter(Boolean)
+  : null;
+const corsOriginOption = allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : '*';
+
+function isClerkEnabled() {
+  return Boolean(
+    process.env.CLERK_SECRET_KEY &&
+    process.env.CLERK_SECRET_KEY.trim() &&
+    process.env.CLERK_PUBLISHABLE_KEY &&
+    process.env.CLERK_PUBLISHABLE_KEY.trim()
+  );
+}
+
+function getRequestUserId(req) {
+  if (!isClerkEnabled()) return null;
+  try {
+    const auth = getAuth(req);
+    return auth?.userId || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function verifySocketUser(token) {
+  if (!isClerkEnabled() || !token || typeof token !== 'string') return null;
+  try {
+    const payload = await verifyToken(token, {
+      secretKey: process.env.CLERK_SECRET_KEY.trim()
+    });
+    return payload?.sub || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+const userAiHistory = new Map();
+const USER_AI_WINDOW_MS = 60 * 60 * 1000;
+const USER_AI_MAX_PER_HOUR = 25;
+
+function consumeUserAiQuota(userId) {
+  if (!userId) return { allowed: true };
+  const now = Date.now();
+  const recent = (userAiHistory.get(userId) || []).filter((ts) => now - ts < USER_AI_WINDOW_MS);
+  if (recent.length >= USER_AI_MAX_PER_HOUR) {
+    userAiHistory.set(userId, recent);
+    const waitMin = Math.max(1, Math.ceil((USER_AI_WINDOW_MS - (now - recent[0])) / 60000));
+    return { allowed: false, waitMin };
+  }
+  recent.push(now);
+  userAiHistory.set(userId, recent);
+  return { allowed: true };
+}
+
+function refundUserAiQuota(userId) {
+  if (!userId) return;
+  const recent = userAiHistory.get(userId);
+  if (Array.isArray(recent) && recent.length > 0) {
+    recent.pop();
+  }
+}
 
 const app = express();
 
@@ -49,26 +116,14 @@ function getLanIp() {
 
 
 
-function purgeOrphanImages(roomsMap) {
+async function purgeOrphanImages(roomsMap) {
   try {
-    if (!fs.existsSync(uploadsDir)) return { deletedCount: 0, bytesFreed: 0, mbFreed: '0.00' };
-    const allFiles = fs.readdirSync(uploadsDir);
-    if (allFiles.length === 0) return { deletedCount: 0, bytesFreed: 0, mbFreed: '0.00' };
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    const referencedFiles = await questionsStore.listReferencedImages();
 
-    const referencedFiles = new Set();
-
-    // 1. Check all saved packs
-    const savedSets = questionsStore.readSets ? questionsStore.readSets() : [];
-    savedSets.forEach((s) => {
-      (s.questions || []).forEach((q) => {
-        const img = q.imageUrl || q.image;
-        if (typeof img === 'string' && img.startsWith('/uploads/')) {
-          referencedFiles.add(path.basename(img));
-        }
-      });
-    });
-
-    // 2. Check all active game rooms
+    // Check all active game rooms
     if (roomsMap instanceof Map) {
       roomsMap.forEach((room) => {
         (room.questions || []).forEach((q) => {
@@ -85,6 +140,7 @@ function purgeOrphanImages(roomsMap) {
     const now = Date.now();
     const GRACE_PERIOD_MS = 15 * 60 * 1000; // 15m grace period for in-progress uploads
 
+    const allFiles = fs.readdirSync(uploadsDir);
     allFiles.forEach((file) => {
       if (!referencedFiles.has(file)) {
         const filePath = path.join(uploadsDir, file);
@@ -98,6 +154,9 @@ function purgeOrphanImages(roomsMap) {
         } catch (e) {}
       }
     });
+
+    const dbDeletedCount = await questionsStore.purgeDbOrphanImages(referencedFiles, GRACE_PERIOD_MS);
+    deletedCount += dbDeletedCount;
 
     return {
       deletedCount,
@@ -136,18 +195,51 @@ const upload = multer({
   }
 });
 
-app.use(cors());
+app.use(cors({ origin: corsOriginOption }));
 app.use(express.json());
+if (isClerkEnabled()) {
+  app.use(
+    clerkMiddleware({
+      publishableKey: process.env.CLERK_PUBLISHABLE_KEY.trim(),
+      secretKey: process.env.CLERK_SECRET_KEY.trim()
+    })
+  );
+}
 
 app.use('/uploads', express.static(uploadsDir));
+app.get('/uploads/:filename', async (req, res) => {
+  try {
+    const safeName = path.basename(req.params.filename || '');
+    if (!safeName) return res.status(404).end();
+    const imgRow = await questionsStore.getUploadedImage(safeName);
+    if (!imgRow || !imgRow.data) return res.status(404).end();
+    res.setHeader('Content-Type', imgRow.mime_type || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    fs.promises.writeFile(path.join(uploadsDir, safeName), imgRow.data).catch(() => {});
+    return res.send(imgRow.data);
+  } catch (e) {
+    return res.status(404).end();
+  }
+});
 
 app.post('/api/upload-image', (req, res) => {
-  upload.single('image')(req, res, (err) => {
+  if (isClerkEnabled() && !getRequestUserId(req)) {
+    return res.status(401).json({ error: 'Please sign in to upload question images.' });
+  }
+  upload.single('image')(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message || 'Upload failed' });
     }
     if (!req.file) {
       return res.status(400).json({ error: 'No image file uploaded' });
+    }
+    try {
+      if (questionsStore.isUsingDb()) {
+        const buffer = await fs.promises.readFile(req.file.path);
+        await questionsStore.saveUploadedImage(req.file.filename, req.file.mimetype, buffer);
+      }
+    } catch (dbErr) {
+      console.error('[Upload Image] Failed to persist image to DB:', dbErr.message);
     }
     res.json({ imageUrl: `/uploads/${req.file.filename}` });
   });
@@ -156,7 +248,17 @@ app.post('/api/upload-image', (req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: corsOriginOption, methods: ['GET', 'POST'] }
+});
+
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake?.auth?.token;
+    socket.data.userId = await verifySocketUser(token);
+  } catch (e) {
+    socket.data.userId = null;
+  }
+  next();
 });
 
 const rooms = new Map();
@@ -213,9 +315,18 @@ function publicPlayer(p) {
     isHost: p.isHost,
     power: p.power,
     powerCooldownUntil: p.powerCooldownUntil || 0,
+    powerUsed: !!p.powerUsed,
     frozen: p.frozen,
     connected: p.connected,
     powerChosen: !!p.power
+  };
+}
+
+function defaultRoomSettings() {
+  return {
+    powerMode: 'choose',
+    powerCooldownSec: 120,
+    shuffleQuestions: false
   };
 }
 
@@ -232,6 +343,7 @@ function roomSnapshot(room) {
     paused: !!room.paused,
     pausedAt: room.paused ? room.pausedAt : null,
     locked: !!room.locked,
+    settings: room.settings || defaultRoomSettings(),
     powerSelectStartedAt: room.powerSelectStartedAt || null,
     powerSelectDurationMs: POWER_SELECT_DURATION_MS,
     isDoublePoints: !!room.isDoublePoints,
@@ -257,18 +369,40 @@ function sanitizeQuestion(q) {
 io.on('connection', (socket) => {
   socket.data.pin = null;
 
-  socket.on('createRoom', ({ gameName }, cb) => {
+  socket.on('syncAuth', async ({ authToken } = {}, cb) => {
+    if (!isClerkEnabled()) {
+      socket.data.userId = null;
+      return cb && cb({ ok: true, userId: null });
+    }
+    const verified = await verifySocketUser(authToken);
+    socket.data.userId = verified || null;
+    if (cb) cb({ ok: true, userId: socket.data.userId });
+  });
+
+  socket.on('createRoom', async ({ gameName, authToken }, cb) => {
+    let hostUserId = null;
+    if (isClerkEnabled()) {
+      hostUserId = (await verifySocketUser(authToken)) || socket.data.userId;
+      if (!hostUserId) {
+        if (cb) cb({ ok: false, authRequired: true, message: 'Please sign in to host a game.' });
+        return;
+      }
+      socket.data.userId = hostUserId;
+    }
+
     const pin = generatePin();
     const room = {
       pin,
       id: uuidv4(),
       hostId: socket.id,
+      hostUserId,
       gameName: String(gameName || '').trim().slice(0, 40) || 'Finnival',
       players: [],
       questions: [],
       questionIndex: -1,
       state: 'lobby',
       locked: false,
+      settings: defaultRoomSettings(),
       bannedNames: [],
       answers: new Map(),
       timer: null,
@@ -328,6 +462,7 @@ io.on('connection', (socket) => {
       isHost: false,
       power: null,
       powerCooldownUntil: 0,
+      powerUsed: false,
       frozen: false,
       connected: true
     };
@@ -341,7 +476,7 @@ io.on('connection', (socket) => {
     io.to(room.pin).emit('toast', { text: `${player.avatar} ${player.name} joined`, tone: 'join' });
   });
 
-  socket.on('rejoinRoom', ({ pin, sessionToken, playerId }, cb) => {
+  socket.on('rejoinRoom', async ({ pin, sessionToken, playerId, authToken }, cb) => {
     const room = rooms.get(String(pin || '').trim());
     if (!room) return cb && cb({ ok: false, message: 'Game no longer exists.' });
 
@@ -359,6 +494,14 @@ io.on('connection', (socket) => {
       return cb && cb({ ok: false, message: 'You are no longer in this game.' });
     }
 
+    if (isHost && isClerkEnabled() && room.hostUserId) {
+      const verifiedUserId = (await verifySocketUser(authToken)) || socket.data.userId;
+      if (verifiedUserId !== room.hostUserId) {
+        return cb && cb({ ok: false, authRejected: true, message: 'Host signed out.' });
+      }
+      socket.data.userId = verifiedUserId;
+    }
+
     const token = isHost ? room.hostSessionToken : player.sessionToken;
     if (token && room.disconnectGraceTimers && room.disconnectGraceTimers.has(token)) {
       clearTimeout(room.disconnectGraceTimers.get(token));
@@ -371,6 +514,7 @@ io.on('connection', (socket) => {
       clearTimeout(room.hostGraceTimer);
       room.hostId = socket.id;
       if (room.host) room.host.id = socket.id;
+      if (room.hostUserId) socket.data.userId = room.hostUserId;
     } else {
       const oldId = player.id;
       player.id = socket.id;
@@ -460,9 +604,17 @@ io.on('connection', (socket) => {
     io.to(room.pin).emit('toast', { text: `${player.name} left the lobby`, tone: 'warn' });
   });
 
-  socket.on('abandonLobby', () => {
-    const room = rooms.get(socket.data.pin);
-    if (!room || room.hostId !== socket.id) return;
+  socket.on('abandonLobby', (payload = {}) => {
+    let room = rooms.get(socket.data.pin);
+    let authorized = room && room.hostId === socket.id;
+    if (!authorized && payload?.pin && payload?.sessionToken) {
+      const targetRoom = rooms.get(String(payload.pin).trim());
+      if (targetRoom && targetRoom.hostSessionToken === payload.sessionToken) {
+        room = targetRoom;
+        authorized = true;
+      }
+    }
+    if (!room || !authorized) return;
 
     clearRoomTimers(room);
     if (room.disconnectGraceTimers) {
@@ -495,6 +647,29 @@ io.on('connection', (socket) => {
     room.locked = !!locked;
     io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
     if (cb) cb({ ok: true, locked: room.locked });
+  });
+
+  socket.on('updateSettings', (incoming, cb) => {
+    const room = rooms.get(socket.data.pin);
+    if (!room || room.hostId !== socket.id) return cb && cb({ ok: false });
+    if (room.state !== 'lobby') return cb && cb({ ok: false, message: 'Settings can only be changed in the lobby.' });
+
+    const prev = room.settings || defaultRoomSettings();
+    const powerMode = ['choose', 'random', 'off'].includes(incoming?.powerMode) ? incoming.powerMode : prev.powerMode;
+    let powerCooldownSec = prev.powerCooldownSec;
+    if (incoming?.powerCooldownSec !== undefined) {
+      const val = Number(incoming.powerCooldownSec);
+      if (val === -1) {
+        powerCooldownSec = -1;
+      } else if (Number.isFinite(val)) {
+        powerCooldownSec = Math.max(5, Math.round(val));
+      }
+    }
+    const shuffleQuestions = incoming?.shuffleQuestions !== undefined ? !!incoming.shuffleQuestions : prev.shuffleQuestions;
+
+    room.settings = { powerMode, powerCooldownSec, shuffleQuestions };
+    io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
+    if (cb) cb({ ok: true, settings: room.settings });
   });
 
   socket.on('sendLobbyChat', ({ text }, cb) => {
@@ -560,49 +735,56 @@ io.on('connection', (socket) => {
   });
 
 
+  const normalizeQuestions = (list) => (list || []).map((q) => {
+    const img = q.imageUrl || q.image || null;
+    const minVal = Number(q.min);
+    const maxVal = Number(q.max);
+    const numVal = Number(q.correctNumber);
+    return {
+      type: q.type || 'classic',
+      text: String(q.text || '').slice(0, 200),
+      options: (q.options || []).map((o) => String(o).slice(0, 80)),
+      correctAnswer: Number(q.correctAnswer) || 0,
+      timeLimit: Math.max(5, Math.round(Number(q.timeLimit)) || 20),
+      image: img,
+      imageUrl: img,
+      correctAnswerText: q.correctAnswerText || '',
+      min: Number.isFinite(minVal) ? minVal : 0,
+      max: Number.isFinite(maxVal) ? maxVal : 100,
+      correctNumber: Number.isFinite(numVal) ? numVal : 50,
+      pairs: Array.isArray(q.pairs) ? q.pairs.map((p) => ({ left: String(p.left || ''), right: String(p.right || '') })) : []
+    };
+  });
+
   socket.on('setQuestions', ({ questions }) => {
     const room = rooms.get(socket.data.pin);
     if (!room || room.hostId !== socket.id) return;
 
-    room.questions = (questions || []).map((q) => ({
-        type: q.type || 'classic',
-        text: String(q.text || '').slice(0, 200),
-        options: (q.options || []).map((o) => String(o).slice(0, 80)),
-        correctAnswer: Number(q.correctAnswer) || 0,
-        timeLimit: Math.max(5, Math.round(Number(q.timeLimit)) || 20),
-        image: q.image || null,
-        correctAnswerText: q.correctAnswerText || '',
-        min: Number(q.min) || 0,
-        max: Number(q.max) || 100,
-        correctNumber: Number(q.correctNumber) || 50,
-        pairs: Array.isArray(q.pairs) ? q.pairs.map(p => ({ left: String(p.left||''), right: String(p.right||'') })) : []
-      }));
+    room.questions = normalizeQuestions(questions);
     io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
   });
 
-  socket.on('loadQuestionSet', ({ setId }) => {
+  socket.on('loadQuestionSet', async ({ setId, authToken }) => {
     const room = rooms.get(socket.data.pin);
     if (!room || room.hostId !== socket.id) return;
-    const set = questionsStore.getSet(setId);
-    if (!set) {
-      return socket.emit('toast', { text: 'Question set not found.', tone: 'warn' });
+    try {
+      const userId = isClerkEnabled()
+        ? ((await verifySocketUser(authToken)) || room.hostUserId || socket.data.userId)
+        : null;
+      const set = await questionsStore.getSet(setId, { userId, authEnabled: isClerkEnabled() });
+      if (!set) {
+        return socket.emit('toast', { text: 'Question set not found.', tone: 'warn' });
+      }
+      if (set.forbidden) {
+        return socket.emit('toast', { text: 'You do not have permission to load that quiz pack.', tone: 'warn' });
+      }
+      room.questions = normalizeQuestions(set.questions);
+      io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
+      socket.emit('questionsLoaded', { questions: room.questions });
+      socket.emit('toast', { text: `Loaded "${set.name}" (${room.questions.length} questions)`, tone: 'join' });
+    } catch (err) {
+      socket.emit('toast', { text: 'Could not load that question set right now.', tone: 'warn' });
     }
-    room.questions = set.questions.map((q) => ({
-        type: q.type || 'classic',
-        text: String(q.text || '').slice(0, 200),
-        options: (q.options || []).map((o) => String(o).slice(0, 80)),
-        correctAnswer: Number(q.correctAnswer) || 0,
-        timeLimit: Math.max(5, Math.round(Number(q.timeLimit)) || 20),
-        image: q.image || null,
-        correctAnswerText: q.correctAnswerText || '',
-        min: Number(q.min) || 0,
-        max: Number(q.max) || 100,
-        correctNumber: Number(q.correctNumber) || 50,
-        pairs: Array.isArray(q.pairs) ? q.pairs.map(p => ({ left: String(p.left||''), right: String(p.right||'') })) : []
-      }));
-    io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
-    socket.emit('questionsLoaded', { questions: room.questions });
-    socket.emit('toast', { text: `Loaded "${set.name}" (${room.questions.length} questions)`, tone: 'join' });
   });
 
   socket.on('choosePower', ({ power }, cb) => {
@@ -645,15 +827,54 @@ io.on('connection', (socket) => {
     if (room.questions.length === 0) {
       return socket.emit('toast', { text: 'Add at least one question first.', tone: 'warn' });
     }
-    room.state = 'powerSelect';
+
+    const settings = room.settings || defaultRoomSettings();
     room.questionIndex = -1;
     room.players.forEach((p) => {
       p.score = 0;
       p.streak = 0;
       p.power = null;
       p.powerCooldownUntil = 0;
+      p.powerUsed = false;
       p.frozen = false;
+      p.heistTarget = null;
     });
+
+    if (settings.shuffleQuestions && room.questions.length > 1) {
+      room.lobbyQuestions = [...room.questions];
+      const shuffled = [...room.questions];
+      for (let i = shuffled.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      room.questions = shuffled;
+    } else {
+      room.lobbyQuestions = null;
+    }
+
+    if (settings.powerMode === 'off') {
+      io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
+      io.to(room.pin).emit('toast', { text: '⚡ Pure Trivia Mode — Powers are OFF!', tone: 'join' });
+      nextQuestion(room);
+      return;
+    }
+
+    if (settings.powerMode === 'random') {
+      const powerKeys = Object.keys(POWERS);
+      room.players.forEach((p) => {
+        if (!p.isHost) {
+          p.power = powerKeys[Math.floor(Math.random() * powerKeys.length)];
+          const meta = POWERS[p.power];
+          io.to(p.id).emit('toast', { text: `🎲 Random Power: ${meta.icon} ${meta.name}!`, tone: 'power' });
+        }
+      });
+      io.to(room.hostId).emit('toast', { text: '🎲 Random powers assigned! Starting...', tone: 'join' });
+      io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
+      nextQuestion(room);
+      return;
+    }
+
+    room.state = 'powerSelect';
     room.powerSelectStartedAt = Date.now();
     io.to(room.pin).emit('gameStarted');
     io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
@@ -942,10 +1163,16 @@ io.on('connection', (socket) => {
     room.state = 'lobby';
     room.questionIndex = -1;
     room.answers = new Map();
+    if (Array.isArray(room.lobbyQuestions)) {
+      room.questions = room.lobbyQuestions;
+      room.lobbyQuestions = null;
+    }
     room.players.forEach((p) => {
       p.score = 0;
       p.streak = 0;
+      p.power = null;
       p.powerCooldownUntil = 0;
+      p.powerUsed = false;
       p.frozen = false;
       p.heistTarget = null;
     });
@@ -1044,19 +1271,25 @@ io.on('connection', (socket) => {
 
   const consumePower = (fn) => {
     const room = rooms.get(socket.data.pin);
-    if (!room) return;
+    if (!room || room.settings?.powerMode === 'off') return;
     const player = room.players.find((p) => p.id === socket.id);
-    if (!player || !player.power || Date.now() < (player.powerCooldownUntil || 0)) return;
-    player.powerCooldownUntil = Date.now() + POWER_COOLDOWN_MS;
+    if (!player || !player.power || player.powerUsed || Date.now() < (player.powerCooldownUntil || 0)) return;
+    const cooldownSec = room.settings?.powerCooldownSec ?? Math.round(POWER_COOLDOWN_MS / 1000);
+    if (cooldownSec === -1) {
+      player.powerUsed = true;
+      player.powerCooldownUntil = 0;
+    } else {
+      player.powerCooldownUntil = Date.now() + Math.max(5, cooldownSec) * 1000;
+    }
     fn(room, player);
     io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
   };
 
   socket.on('usePower', ({ targetId, currentPairs }) => {
     const room = rooms.get(socket.data.pin);
-    if (!room || room.paused) return;
+    if (!room || room.paused || room.settings?.powerMode === 'off') return;
     const me = room.players.find((p) => p.id === socket.id);
-    if (!me || !me.power || Date.now() < (me.powerCooldownUntil || 0)) return;
+    if (!me || !me.power || me.powerUsed || Date.now() < (me.powerCooldownUntil || 0)) return;
 
     const power = me.power;
 
@@ -1075,7 +1308,7 @@ io.on('connection', (socket) => {
     if (power === 'steal') {
       consumePower((rm, actor) => {
         const target = rm.players.find((p) => p.id === targetId && p.id !== actor.id && p.connected && !p.isHost);
-        if (!target) { actor.powerCooldownUntil = 0; return; }
+        if (!target) { actor.powerCooldownUntil = 0; actor.powerUsed = false; return; }
         actor.heistTarget = target.id;
         io.to(rm.pin).emit('toast', {
           text: `🪝 ${actor.name} targeted ${target.name} with Heist!`,
@@ -1104,7 +1337,7 @@ io.on('connection', (socket) => {
     if (power === 'freeze') {
       consumePower((rm, actor) => {
         const target = rm.players.find((p) => p.id === targetId && p.id !== actor.id);
-        if (!target) { actor.powerCooldownUntil = 0; return; }
+        if (!target) { actor.powerCooldownUntil = 0; actor.powerUsed = false; return; }
         target.frozen = true;
         io.to(target.id).emit('powerEffect', { type: 'frozen', from: actor.name, duration: FREEZE_DURATION_MS });
         io.to(rm.pin).emit('toast', { text: `❄️ ${actor.name} froze ${target.name}!`, tone: 'power' });
@@ -1136,7 +1369,7 @@ io.on('connection', (socket) => {
     if (power === 'hint') {
       consumePower((rm, actor) => {
         const q = rm.questions[rm.questionIndex];
-        if (!q) { actor.powerCooldownUntil = 0; return; }
+        if (!q) { actor.powerCooldownUntil = 0; actor.powerUsed = false; return; }
         const qType = q.type || 'classic';
 
         if (qType === 'classic') {
@@ -1258,62 +1491,207 @@ app.get('/api/network-info', (req, res) => {
   res.json({ lanIp: getLanIp(), port: PORT });
 });
 
-app.get('/api/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/api/config', (req, res) => {
+  res.json({
+    authEnabled: isClerkEnabled(),
+    dbEnabled: questionsStore.isUsingDb()
+  });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    rooms: rooms.size,
+    authEnabled: isClerkEnabled(),
+    dbEnabled: questionsStore.isUsingDb()
+  });
+});
 app.get('/api/powers', (req, res) => res.json(POWERS));
 app.get('/api/shapes', (req, res) => res.json(SHAPES));
 
-app.get('/api/question-sets', (req, res) => {
-  res.json(questionsStore.listSets());
+app.get('/api/ai-status', async (req, res) => {
+  const status = await aiGenerator.getAiStatus();
+  res.json(status);
 });
 
-app.post('/api/question-sets', (req, res) => {
-  const { name, questions } = req.body || {};
-  if (!name || !Array.isArray(questions) || questions.length === 0) {
-    return res.status(400).json({ error: 'name and non-empty questions array required' });
+app.post('/api/generate-quiz', async (req, res) => {
+  const userId = getRequestUserId(req);
+  if (isClerkEnabled() && !userId) {
+    return res.status(401).json({ error: 'Please sign in to generate AI questions.' });
   }
-  const entry = questionsStore.saveSet(name, questions);
-  res.json({ id: entry.id, name: entry.name, createdAt: entry.createdAt, questionCount: entry.questionCount });
+
+  const { pin, sessionToken, topic, count, types, difficulty, timeLimit } = req.body || {};
+  const room = rooms.get(String(pin || '').trim());
+  if (!room || !sessionToken || room.hostSessionToken !== sessionToken) {
+    return res.status(403).json({ error: 'Only an active lobby host can generate AI questions.' });
+  }
+  if (isClerkEnabled() && room.hostUserId && room.hostUserId !== userId) {
+    return res.status(403).json({ error: 'Only the lobby owner can generate AI questions.' });
+  }
+
+  const now = Date.now();
+  if (room.lastAiGenAt && now - room.lastAiGenAt < 8000) {
+    const waitSec = Math.ceil((8000 - (now - room.lastAiGenAt)) / 1000);
+    return res.status(429).json({ error: `Please wait ${waitSec}s before generating again.` });
+  }
+
+  const quota = consumeUserAiQuota(userId);
+  if (!quota.allowed) {
+    return res.status(429).json({
+      error: `Hourly AI quiz limit reached (${USER_AI_MAX_PER_HOUR}/hr). Try again in ~${quota.waitMin}m, or add questions manually.`
+    });
+  }
+
+  room.lastAiGenAt = now;
+  try {
+    const result = await aiGenerator.generateQuiz({
+      topic,
+      count,
+      types,
+      difficulty,
+      timeLimit
+    });
+    console.log(`[AI Quiz Generator] Room ${room.pin}: generated ${result.questions.length} questions via ${result.providerUsed}`);
+    res.json({ ok: true, packName: result.packName, questions: result.questions });
+  } catch (err) {
+    room.lastAiGenAt = 0;
+    refundUserAiQuota(userId);
+    res.status(400).json({ error: err.message || 'Could not generate questions right now.' });
+  }
 });
 
+app.get('/api/question-sets', async (req, res) => {
+  try {
+    const authEnabled = isClerkEnabled();
+    const userId = getRequestUserId(req);
+    const sets = await questionsStore.listSets({ userId, authEnabled });
+    res.json(sets);
+  } catch (err) {
+    console.error('[Question Sets List Error]:', err);
+    res.status(500).json({ error: 'Could not load saved question sets.' });
+  }
+});
 
-app.post('/api/purge-unused-images', (req, res) => {
-  const result = purgeOrphanImages(rooms);
+app.get('/api/question-sets/:id', async (req, res) => {
+  try {
+    const authEnabled = isClerkEnabled();
+    const userId = getRequestUserId(req);
+    const set = await questionsStore.getSet(req.params.id, { userId, authEnabled });
+    if (!set) return res.status(404).json({ error: 'not found' });
+    if (set.forbidden) return res.status(403).json({ error: 'You do not have access to this quiz pack.' });
+    res.json(set);
+  } catch (err) {
+    console.error('[Question Set Get Error]:', err);
+    res.status(500).json({ error: 'Could not fetch question set.' });
+  }
+});
+
+app.post('/api/question-sets', async (req, res) => {
+  try {
+    const authEnabled = isClerkEnabled();
+    const userId = getRequestUserId(req);
+    if (authEnabled && !userId) {
+      return res.status(401).json({ error: 'Please sign in to save quiz packs.' });
+    }
+    const { name, questions } = req.body || {};
+    if (!name || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: 'name and non-empty questions array required' });
+    }
+    const entry = await questionsStore.saveSet(name, questions, { userId });
+    res.json({
+      id: entry.id,
+      name: entry.name,
+      createdAt: entry.createdAt,
+      questionCount: entry.questionCount,
+      isPublic: false,
+      isOwner: true
+    });
+  } catch (err) {
+    console.error('[Question Set Save Error]:', err);
+    res.status(500).json({ error: 'Could not save question set.' });
+  }
+});
+
+app.post('/api/purge-unused-images', async (req, res) => {
+  if (isClerkEnabled() && !getRequestUserId(req)) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const result = await purgeOrphanImages(rooms);
   res.json({ ok: true, ...result });
 });
 
-app.delete('/api/question-sets/:id', (req, res) => {
-  const ok = questionsStore.deleteSet(req.params.id);
-  if (ok) purgeOrphanImages(rooms);
-  if (!ok) return res.status(404).json({ error: 'not found' });
-  res.json({ ok: true });
+app.delete('/api/question-sets/:id', async (req, res) => {
+  try {
+    const authEnabled = isClerkEnabled();
+    const userId = getRequestUserId(req);
+    if (authEnabled && !userId) {
+      return res.status(401).json({ error: 'Please sign in to delete quiz packs.' });
+    }
+    const result = await questionsStore.deleteSet(req.params.id, { userId, authEnabled });
+    if (result.ok) await purgeOrphanImages(rooms);
+    if (!result.ok) {
+      if (result.reason === 'forbidden') {
+        return res.status(403).json({ error: 'You can only delete your own private quiz packs.' });
+      }
+      return res.status(404).json({ error: 'not found' });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Question Set Delete Error]:', err);
+    res.status(500).json({ error: 'Could not delete question set.' });
+  }
 });
+
+const clientBuildDir = path.join(__dirname, '..', 'client', 'build');
+if (process.env.SERVE_CLIENT === 'true' && fs.existsSync(clientBuildDir)) {
+  app.use(express.static(clientBuildDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path.startsWith('/socket.io/')) {
+      return next();
+    }
+    return res.sendFile(path.join(clientBuildDir, 'index.html'));
+  });
+}
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, '0.0.0.0', () => {
-  const startupPurge = purgeOrphanImages(rooms);
-  if (startupPurge.deletedCount > 0) {
-    console.log(`Startup orphan check: cleaned ${startupPurge.deletedCount} unused images (${startupPurge.mbFreed} MB freed)`);
+async function startServer() {
+  try {
+    const storageInfo = await questionsStore.initStorage();
+    console.log(`[Storage] Initialized in ${storageInfo.mode.toUpperCase()} mode`);
+  } catch (err) {
+    console.error('[Storage Error] Could not initialize database:', err);
   }
 
-  // Automatically sweep and purge unreferenced uploaded images older than 15 minutes
-  setInterval(() => {
-    const sweep = purgeOrphanImages(rooms);
-    if (sweep.deletedCount > 0) {
-      console.log(`[Auto-Purge] Cleaned ${sweep.deletedCount} unused images (${sweep.mbFreed} MB freed)`);
-    }
-  }, 15 * 60 * 1000);
+  console.log(`[Auth] Clerk authentication: ${isClerkEnabled() ? 'ENABLED' : 'LOCAL OPEN MODE (set CLERK keys in .env to enable)'}`);
 
-  const nets = require('os').networkInterfaces();
-  let lanIP = 'localhost';
-  for (const iface of Object.values(nets)) {
-    for (const cfg of iface) {
-      if (cfg.family === 'IPv4' && !cfg.internal) {
-        lanIP = cfg.address;
-        break;
+  server.listen(PORT, '0.0.0.0', async () => {
+    const startupPurge = await purgeOrphanImages(rooms);
+    if (startupPurge.deletedCount > 0) {
+      console.log(`Startup orphan check: cleaned ${startupPurge.deletedCount} unused images (${startupPurge.mbFreed} MB freed)`);
+    }
+
+    // Automatically sweep and purge unreferenced uploaded images older than 15 minutes
+    setInterval(async () => {
+      const sweep = await purgeOrphanImages(rooms);
+      if (sweep.deletedCount > 0) {
+        console.log(`[Auto-Purge] Cleaned ${sweep.deletedCount} unused images (${sweep.mbFreed} MB freed)`);
+      }
+    }, 15 * 60 * 1000);
+
+    const nets = require('os').networkInterfaces();
+    let lanIP = 'localhost';
+    for (const iface of Object.values(nets)) {
+      for (const cfg of iface) {
+        if (cfg.family === 'IPv4' && !cfg.internal) {
+          lanIP = cfg.address;
+          break;
+        }
       }
     }
-  }
-  console.log(`Finnival server running on http://localhost:${PORT}`);
-  console.log(`For other devices on your network: http://${lanIP}:${PORT}`);
-});
+    console.log(`Finnival server running on http://localhost:${PORT}`);
+    console.log(`For other devices on your network: http://${lanIP}:${PORT}`);
+  });
+}
+
+startServer();
 

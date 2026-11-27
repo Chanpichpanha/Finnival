@@ -295,7 +295,7 @@ Rather than being limited to standard 4-option MCQs, the engine supports 4 disti
   * Real-time lobby chatbox with 50-message cap, 120-character limit, and autoscroll.
   * Floating animated emoji reactions (`🔥`, `💀`, `😭`, `😂`, `👑`, `🪝`) with 5s cooldown, audio pop triggers, and floating Framer Motion animations across contestant screens.
 * **Third-Party Script Error Shielding**:
-  * Defensive capture-phase exception handlers in `public/index.html` and `src/index.js` preventing third-party browser wallet/reader injections (e.g. Brave iOS Web3 / Firefox user-scripts) from displaying red React error overlays.
+  * Defensive capture-phase exception handlers in `public/index.html` and `src/index.js` preventing third-party browser wallet/reader/shield injections (e.g. Brave iOS Web3/Shields `Script error.` or Firefox user-scripts) from displaying red React dev error overlays.
 
 ### Milestone 8: In-Game 2× Points, Battle Feed & Image Uploads (Completed)
 * **Mid-Question `🔥 2× Points` Host Power**:
@@ -310,3 +310,26 @@ Rather than being limited to standard 4-option MCQs, the engine supports 4 disti
   * Canvas-based client downscaling to max 1200×1200px at 85% JPEG before upload.
   * Preloading engine (`preloadImages`) caching images before reveal.
   * Automated background garbage collector running every 15 minutes (`purgeOrphanImages`) removing unreferenced images older than 15 minutes with zero user effort needed.
+
+### Milestone 9: Host Game Rules, Question Pack Import/Export & Lobby Music (Completed)
+* **Host Game Settings Panel (`LobbyScreen.js` & `server/index.js`)**:
+  * Added `room.settings` (`powerMode`, `powerCooldownSec`, `shuffleQuestions`) synchronized via `updateSettings` socket event and `roomSnapshot`.
+  * **Power Mode**: Supports `choose` (Players Choose), `random` (Random Powers auto-assigned on start, skipping `powerSelect`), and `off` (Pure Trivia mode, powers disabled and `powerSelect` skipped).
+  * **Power Cooldown**: Presets (`60s`, `120s`, `180s`, `Once per game` via `-1` / `player.powerUsed`) plus **Custom seconds input** (minimum 5s). Dynamic cooldown description updates in `PowerSelectScreen.js` and `Used (Once per game)` state in `GameScreen.js`.
+  * **Shuffle Question Order**: Shuffles a match copy of `room.questions` on `startGame` while preserving `room.lobbyQuestions` so `playAgain` restores the host's original order.
+  * Contestants see a read-only rules summary badge in the lobby.
+* **Question Pack Import / Export (`.json`)**:
+  * Added `GET /api/question-sets/:id` endpoint on server for single-pack retrieval.
+  * Added `client/src/utils/questionPack.js` with `parseImportedPack`, `downloadJsonPack`, and `AI_QUIZ_PROMPT`.
+  * Smart AI-friendly JSON importer strips markdown fences/chatter and supports both native Finnival fields and generic AI aliases (`title`, `question`/`prompt`, string/letter `correct_answer`, auto-detected question types).
+  * Located neatly inside the **Saved Packs** tab (`📥 Import (.json)`, `📋 Paste JSON`, `📤 Export`, inline `💾 Save Current Quiz` name input, and Replace/Append guard).
+* **Built-In Multi-Provider AI Quiz Generator (`server/ai-quiz-generator.js`, `LobbyScreen.js`)**:
+  * Zero-dependency backend module loading optional `server/.env` (`server/.env.example` template included) and supporting silent automatic fallback across **Gemini** (`GEMINI_API_KEY`, trying `gemini-2.5-flash` / `gemini-2.5-flash-lite` / `gemini-2.0-flash`), **Groq** (`GROQ_API_KEY` / `llama-3.3-70b-versatile`), and **Local Ollama** (`OLLAMA_URL` / auto-detected model via `/api/tags`).
+  * Added host-authenticated, 8s rate-limited `POST /api/generate-quiz` endpoint generating and validating all 4 question types (`classic`, `short_answer`, `slider`, `match`). Backend logs provider diagnostics server-side while returning clean, non-technical status/errors to the client without exposing model names or key setup hints.
+* **Streamlined 3-Tab Host Workspace (`LobbyScreen.js`, `App.css`)**:
+  * Consolidated lobby header (PIN, QR code, inline `Copy Join Link` feedback, Lock/Unlock, Music toggle, Close/Leave) and collapsed **Game Rules** into a compact one-line summary bar (`Customize ▾`).
+  * Unified quiz creation into a clean 3-tab **`🎯 Build Your Quiz`** card: **✨ AI Quiz** (topic, type chips, count, difficulty, shared 10s–60s + Custom sec/min time picker — zero API key inputs, zero provider/model selectors), **✏️ Add Manually** (with optional image upload/URL positioned directly beneath the question input to match gameplay order, shared 10s–60s + Custom sec/min time picker, auto-opened on edit), and **📚 Saved** (responsive pack cards, `.json` import/paste).
+  * Placed **`💾 Save Current Quiz`** (inline pack name prompt) and **`📤 Export (.json)`** conditionally directly beneath `Your Quiz` when 1 or more questions exist, plus mobile-responsive grid tabs and wrapping safeguards in `App.css`.
+* **Synthesized Arcade Lobby Music (`client/src/utils/sound.js`)**:
+  * Added gentle procedural 16-step triangle/sine arcade loop (`startLobbyMusic` / `stopLobbyMusic`) active during `LobbyScreen`.
+  * Added persistent `finnival_music_muted` preference (`isMusicMuted`, `toggleMusicMute`) synced with the global `🔊/🔇` mute button plus a dedicated `🎵 Music: On/Off` toggle button in `LobbyScreen.js`.

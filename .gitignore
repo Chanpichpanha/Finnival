@@ -1,17 +1,20 @@
 node_modules/
 build/
 .env
-.env.local
+.env.*
+!.env.example
 npm-debug.log*
 .DS_Store
+.vscode/
 
 *.zip
 
 # Build output
 client/build/
 
-# Data files
+# Local data & uploads
 server/data/
+server/uploads/
 
 # OS junk
 Thumbs.db

@@ -6,16 +6,22 @@
   <title>Finnival</title>
   <script>
     // Suppress third-party browser extension & mobile injected script errors
-    // (e.g. Brave iOS crypto wallet, Firefox iOS reader, extension scripts)
+    // (e.g. Brave iOS crypto wallet/shields, Firefox iOS reader, extension scripts)
     window.addEventListener('error', function (e) {
       var msg = (e && e.message) ? String(e.message) : '';
       var filename = (e && e.filename) ? String(e.filename) : '';
+      var isCrossOriginScriptError =
+        msg === 'Script error.' ||
+        msg === 'Script error' ||
+        (!filename && !(e && e.lineno) && !(e && e.error));
       if (
+        isCrossOriginScriptError ||
         msg.indexOf('__firefox__') !== -1 ||
         msg.indexOf('ethereum') !== -1 ||
         msg.indexOf('refresh_youtube_quality') !== -1 ||
         msg.indexOf('selectedAddress') !== -1 ||
-        filename.indexOf('extension') !== -1
+        filename.indexOf('extension') !== -1 ||
+        filename.indexOf('webkit') !== -1
       ) {
         e.stopImmediatePropagation();
         e.preventDefault();
@@ -24,8 +30,11 @@
     }, true);
 
     window.addEventListener('unhandledrejection', function (e) {
-      var msg = (e && e.reason && e.reason.message) ? String(e.reason.message) : '';
+      var reason = e && e.reason;
+      var msg = reason ? String(reason.message || reason) : '';
       if (
+        msg === 'Script error.' ||
+        msg === 'Script error' ||
         msg.indexOf('__firefox__') !== -1 ||
         msg.indexOf('ethereum') !== -1 ||
         msg.indexOf('selectedAddress') !== -1
@@ -35,6 +44,8 @@
       }
     }, true);
   </script>
+  <link rel="preconnect" href="https://clerk.accounts.dev" crossorigin>
+  <link rel="dns-prefetch" href="https://clerk.accounts.dev">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">

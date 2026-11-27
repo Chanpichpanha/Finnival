@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const POWERS = [
@@ -104,11 +104,16 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
     );
   }
 
+  const cooldownSec = room?.settings?.powerCooldownSec ?? 120;
+  const cooldownDesc = cooldownSec === -1
+    ? 'Pick wisely — you can only use your power once this game!'
+    : `Pick wisely — it recharges every ${cooldownSec >= 60 && cooldownSec % 60 === 0 ? `${cooldownSec / 60} minute${cooldownSec / 60 > 1 ? 's' : ''}` : `${cooldownSec} seconds`}, so you can use it again and again!`;
+
   return (
     <div className="screen-center">
       <div className="card" style={{ textAlign: 'center', maxWidth: 700 }}>
         <h2 style={{ marginBottom: 8 }}>Choose Your Power</h2>
-        <p style={{ marginBottom: 8, color: 'var(--muted)' }}>Pick wisely — it recharges every 2 minutes, so you can use it again and again!</p>
+        <p style={{ marginBottom: 8, color: 'var(--muted)' }}>{cooldownDesc}</p>
         <p style={{ marginBottom: 24, fontWeight: 700, color: timeLeft <= 30 ? 'var(--red)' : 'var(--purple)' }}>
           ⏱ {formatMmSs(timeLeft)} remaining
         </p>

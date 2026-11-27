@@ -4,6 +4,10 @@ let audioCtx = null;
 let lastEmojiSoundTime = 0;
 const EMOJI_AUDIO_THROTTLE_MS = 300;
 
+let lobbyMusicShouldPlay = false;
+let lobbyMusicTimer = null;
+let lobbyStep = 0;
+
 function getContext() {
   if (typeof window === 'undefined') return null;
   if (!audioCtx) {
@@ -21,13 +25,16 @@ function getContext() {
 // Ensure audio context resumes on first user interaction
 if (typeof window !== 'undefined') {
   const unlockAudio = () => {
-    if (audioCtx && audioCtx.state === 'suspended') {
+    if (!audioCtx) {
+      getContext();
+    } else if (audioCtx.state === 'suspended') {
       audioCtx.resume().catch(() => {});
     }
+    syncLobbyMusicLoop();
   };
-  window.addEventListener('click', unlockAudio, { once: true, passive: true });
-  window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
-  window.addEventListener('keydown', unlockAudio, { once: true, passive: true });
+  window.addEventListener('click', unlockAudio, { passive: true });
+  window.addEventListener('touchstart', unlockAudio, { passive: true });
+  window.addEventListener('keydown', unlockAudio, { passive: true });
 }
 
 export function isMuted() {
@@ -39,12 +46,123 @@ export function setMuted(muted) {
   if (typeof window === 'undefined') return;
   localStorage.setItem('finnival_muted', String(muted));
   window.dispatchEvent(new CustomEvent('finnival_mute_change', { detail: { muted } }));
+  syncLobbyMusicLoop();
 }
 
 export function toggleMute() {
   const next = !isMuted();
   setMuted(next);
   return next;
+}
+
+export function isMusicMuted() {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem('finnival_music_muted') === 'true';
+}
+
+export function setMusicMuted(muted) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('finnival_music_muted', String(muted));
+  window.dispatchEvent(new CustomEvent('finnival_music_change', { detail: { musicMuted: muted } }));
+  syncLobbyMusicLoop();
+}
+
+export function toggleMusicMute() {
+  const next = !isMusicMuted();
+  setMusicMuted(next);
+  return next;
+}
+
+const LOBBY_MELODY = [
+  523.25, 659.25, 783.99, 659.25, // C5 E5 G5 E5
+  440.00, 523.25, 659.25, 523.25, // A4 C5 E5 C5
+  349.23, 440.00, 523.25, 440.00, // F4 A4 C5 A4
+  392.00, 493.88, 587.33, 493.88  // G4 B4 D5 B4
+];
+
+const LOBBY_BASS = [
+  130.81, null, 130.81, null, // C3
+  110.00, null, 110.00, null, // A2
+  87.31,  null, 87.31,  null, // F2
+  98.00,  null, 98.00,  null  // G2
+];
+
+function playLobbyStep() {
+  if (!lobbyMusicShouldPlay || isMuted() || isMusicMuted()) return;
+  if (!audioCtx || audioCtx.state !== 'running') return;
+
+  const idx = lobbyStep % LOBBY_MELODY.length;
+  lobbyStep = (lobbyStep + 1) % LOBBY_MELODY.length;
+
+  const now = audioCtx.currentTime;
+  const melFreq = LOBBY_MELODY[idx];
+  if (melFreq) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(melFreq, now);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.032, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.24);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.25);
+  }
+
+  const bassFreq = LOBBY_BASS[idx];
+  if (bassFreq) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(bassFreq, now);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.04, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.36);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.38);
+  }
+}
+
+function syncLobbyMusicLoop() {
+  const shouldRun = lobbyMusicShouldPlay && !isMuted() && !isMusicMuted();
+  if (!shouldRun) {
+    if (lobbyMusicTimer) {
+      clearInterval(lobbyMusicTimer);
+      lobbyMusicTimer = null;
+    }
+    return;
+  }
+
+  if (!audioCtx) {
+    const AudioContextClass = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass();
+    }
+  }
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+
+  if (!lobbyMusicTimer) {
+    lobbyMusicTimer = setInterval(playLobbyStep, 270);
+  }
+}
+
+export function startLobbyMusic() {
+  lobbyMusicShouldPlay = true;
+  syncLobbyMusicLoop();
+}
+
+export function stopLobbyMusic() {
+  lobbyMusicShouldPlay = false;
+  lobbyStep = 0;
+  if (lobbyMusicTimer) {
+    clearInterval(lobbyMusicTimer);
+    lobbyMusicTimer = null;
+  }
 }
 
 // --- Sound Generators ---

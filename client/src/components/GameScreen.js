@@ -186,8 +186,9 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   const isHost = room?.host?.id === playerId;
   const isPaused = Boolean(room?.paused || gameState?.pausedAt);
   const powerMeta = me?.power ? POWER_META[me.power] : null;
+  const powerSpent = Boolean(me?.powerUsed);
   const onCooldown = cooldownLeft > 0;
-  const canUsePower = me?.power && !onCooldown && !answered && !isPaused;
+  const canUsePower = me?.power && !powerSpent && !onCooldown && !answered && !isPaused;
 
   const question = gameState?.question;
   const index = gameState?.index;
@@ -597,9 +598,11 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
           >
             <span style={{ fontSize: '1.4rem', marginRight: 8 }}>{powerMeta.icon}</span>
             <span>
-              {onCooldown
-                ? `Ready in ${Math.floor(cooldownLeft / 60000)}:${String(Math.ceil((cooldownLeft % 60000) / 1000)).padStart(2, '0')}`
-                : `Use ${powerMeta.name}`}
+              {powerSpent
+                ? 'Used (Once per game)'
+                : onCooldown
+                  ? `Ready in ${Math.floor(cooldownLeft / 60000)}:${String(Math.ceil((cooldownLeft % 60000) / 1000)).padStart(2, '0')}`
+                  : `Use ${powerMeta.name}`}
             </span>
           </motion.button>
         </div>

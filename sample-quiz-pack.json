@@ -1,0 +1,36 @@
+{
+  "name": "Finnival Test Pack",
+  "questions": [
+    {
+      "type": "classic",
+      "text": "Which planet is known as the Red Planet?",
+      "options": ["Venus", "Jupiter", "Mars", "Saturn"],
+      "correctAnswer": 2,
+      "timeLimit": 20
+    },
+    {
+      "type": "short_answer",
+      "text": "What is the capital city of Japan?",
+      "correctAnswerText": "Tokyo",
+      "timeLimit": 25
+    },
+    {
+      "type": "slider",
+      "text": "Approximately what percentage of Earth's surface is covered by water?",
+      "min": 0,
+      "max": 100,
+      "correctNumber": 71,
+      "timeLimit": 20
+    },
+    {
+      "type": "match",
+      "text": "Match each country to its capital city:",
+      "pairs": [
+        { "left": "Cambodia", "right": "Phnom Penh" },
+        { "left": "France", "right": "Paris" },
+        { "left": "South Korea", "right": "Seoul" }
+      ],
+      "timeLimit": 30
+    }
+  ]
+}
