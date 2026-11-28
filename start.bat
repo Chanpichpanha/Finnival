@@ -11,9 +11,9 @@ echo.
 :: Get local IP address for display
 for /f "delims=[] tokens=2" %%a in ('ping -4 -n 1 %COMPUTERNAME% ^| findstr "["') do set LOCAL_IP=%%a
 
-:: Check if node_modules exist, install if needed
-if not exist "server\node_modules" (
-    echo [1/4] Installing server dependencies...
+:: Check if server dependencies exist and are complete
+if not exist "server\node_modules\@clerk\express" (
+    echo [1/4] Installing / updating server dependencies...
     cd server
     call npm install
     cd ..
@@ -21,8 +21,9 @@ if not exist "server\node_modules" (
     echo [1/4] Server dependencies found.
 )
 
-if not exist "client\node_modules" (
-    echo [2/4] Installing client dependencies...
+:: Check if client dependencies exist and are complete
+if not exist "client\node_modules\@clerk\react" (
+    echo [2/4] Installing / updating client dependencies...
     cd client
     call npm install
     cd ..

@@ -1,6 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { playPodium } from '../utils/sound';
+
+const CONFETTI_COLORS = ['#FFAF50', '#ED743F', '#824C97', '#3DBE8B', '#5B8FD9', '#FFF6EC'];
+
+function ConfettiBurst() {
+  const pieces = useMemo(() => (
+    Array.from({ length: 28 }, (_, i) => ({
+      id: i,
+      left: `${3 + ((i * 3.4) % 94)}%`,
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      delay: (i % 7) * 0.14,
+      duration: 2.6 + (i % 5) * 0.45,
+      rotate: (i % 2 === 0 ? 1 : -1) * (240 + (i % 4) * 90),
+      drift: (i % 2 === 0 ? 1 : -1) * (18 + (i % 5) * 14)
+    }))
+  ), []);
+
+  return (
+    <div aria-hidden="true" style={{ position: 'fixed', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 9990 }}>
+      {pieces.map((p) => (
+        <motion.div
+          key={p.id}
+          className="confetti-piece"
+          style={{ left: p.left, background: p.color, border: '1.5px solid var(--indigo-deep)' }}
+          initial={{ y: -24, x: 0, opacity: 1, rotate: 0, scale: 0.9 }}
+          animate={{ y: '105vh', x: p.drift, opacity: [1, 1, 0], rotate: p.rotate, scale: 1 }}
+          transition={{ duration: p.duration, delay: p.delay, ease: 'easeIn' }}
+        />
+      ))}
+    </div>
+  );
+}
 
 function AnimatedScore({ value }) {
   const [display, setDisplay] = useState(0);
@@ -37,7 +68,14 @@ function ResultsScreen({ socket, gameState, pin, setScreen }) {
 
   return (
     <div className="screen-center">
-      <div className="card" style={{ maxWidth: 600, textAlign: 'center' }}>
+      <ConfettiBurst />
+      <motion.div
+        className="card"
+        style={{ maxWidth: 600, width: '100%', textAlign: 'center' }}
+        initial={{ opacity: 0, scale: 0.9, y: 28 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 290, damping: 22 }}
+      >
         <motion.h1
           style={{ fontSize: '2.5rem', marginBottom: 8 }}
           initial={{ scale: 0 }}
@@ -113,7 +151,7 @@ function ResultsScreen({ socket, gameState, pin, setScreen }) {
         >
           🔄 Play Again
         </motion.button>
-      </div>
+      </motion.div>
     </div>
   );
 }

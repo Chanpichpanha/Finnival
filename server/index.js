@@ -248,7 +248,9 @@ app.post('/api/upload-image', (req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: corsOriginOption, methods: ['GET', 'POST'] }
+  cors: { origin: corsOriginOption, methods: ['GET', 'POST'] },
+  pingInterval: 10000,
+  pingTimeout: 10000
 });
 
 io.use(async (socket, next) => {
@@ -295,6 +297,111 @@ function clearRoomTimers(room) {
     clearTimeout(room.phaseTimer);
     room.phaseTimer = null;
   }
+}
+
+function clearPlayerPresenceTimers(room, token) {
+  if (!room || !token) return;
+  if (room.disconnectGraceTimers?.has(token)) {
+    clearTimeout(room.disconnectGraceTimers.get(token));
+    room.disconnectGraceTimers.delete(token);
+  }
+  if (room.awayDebounceTimers?.has(token)) {
+    clearTimeout(room.awayDebounceTimers.get(token));
+    room.awayDebounceTimers.delete(token);
+  }
+}
+
+function clearAllRoomPresenceTimers(room) {
+  if (!room) return;
+  if (room.disconnectGraceTimers) {
+    room.disconnectGraceTimers.forEach((t) => clearTimeout(t));
+    room.disconnectGraceTimers.clear();
+  }
+  if (room.awayDebounceTimers) {
+    room.awayDebounceTimers.forEach((t) => clearTimeout(t));
+    room.awayDebounceTimers.clear();
+  }
+}
+
+const DISCONNECT_WARNING_MS = 30000; // 1s-29s: silent; at 30s show "Connection Lost"
+const DISCONNECT_KICK_AFTER_WARNING_MS = 15000; // +15s more (45s total) -> remove player
+
+/**
+ * Schedules final removal of an inactive/disconnected player after `delayMs`.
+ */
+function schedulePlayerRemoval(room, player, delayMs) {
+  const token = player.sessionToken || player.id;
+  if (!room.disconnectGraceTimers) room.disconnectGraceTimers = new Map();
+  if (room.disconnectGraceTimers.has(token)) {
+    clearTimeout(room.disconnectGraceTimers.get(token));
+  }
+
+  const graceTimer = setTimeout(() => {
+    const liveRoom = rooms.get(room.pin);
+    if (!liveRoom) return;
+    const targetP = liveRoom.players.find((p) => (p.sessionToken && p.sessionToken === token) || p.id === player.id);
+    if (!targetP || targetP.connected) return;
+
+    liveRoom.players = liveRoom.players.filter((p) => p !== targetP);
+    clearPlayerPresenceTimers(liveRoom, token);
+    liveRoom.players.forEach((p) => {
+      if (p.heistTarget === targetP.id) p.heistTarget = null;
+    });
+    if (targetP.sessionToken) {
+      if (!liveRoom.timedOutTokens) liveRoom.timedOutTokens = new Set();
+      liveRoom.timedOutTokens.add(targetP.sessionToken);
+    }
+
+    const targetSock = io.sockets.sockets.get(targetP.id);
+    if (targetSock) {
+      targetSock.emit('disconnectedFromLobby', { message: 'Disconnected' });
+      targetSock.leave(liveRoom.pin);
+      targetSock.data.pin = null;
+    }
+
+    io.to(liveRoom.pin).emit('roomUpdate', roomSnapshot(liveRoom));
+    io.to(liveRoom.pin).emit('toast', { text: `${targetP.name} disconnected`, tone: 'warn' });
+  }, delayMs);
+
+  room.disconnectGraceTimers.set(token, graceTimer);
+}
+
+/**
+ * Starts the 45-second two-stage absence timer:
+ * 0-29s silent, at 30s marks player as "Connection Lost", at 45s removes them cleanly.
+ */
+function startDisconnectCountdown(room, player, alreadyElapsedMs = 0) {
+  const token = player.sessionToken || player.id;
+  if (!room.awayDebounceTimers) room.awayDebounceTimers = new Map();
+  if (!room.disconnectGraceTimers) room.disconnectGraceTimers = new Map();
+
+  // Do not restart timers if the countdown is already ticking for this absence
+  if (player.disconnectedAt) return;
+  player.disconnectedAt = Date.now() - Math.max(0, alreadyElapsedMs);
+
+  const stageOneRemaining = Math.max(0, DISCONNECT_WARNING_MS - alreadyElapsedMs);
+  const triggerConnectionLostStage = () => {
+    const liveRoom = rooms.get(room.pin);
+    if (!liveRoom) return;
+    const targetP = liveRoom.players.find((p) => (p.sessionToken && p.sessionToken === token) || p.id === player.id);
+    if (!targetP || !targetP.disconnectedAt) return;
+
+    liveRoom.awayDebounceTimers?.delete(token);
+    targetP.connected = false;
+    targetP.heistTarget = null;
+    liveRoom.players.forEach((p) => { if (p.heistTarget === targetP.id) p.heistTarget = null; });
+    io.to(liveRoom.pin).emit('roomUpdate', roomSnapshot(liveRoom));
+
+    schedulePlayerRemoval(liveRoom, targetP, DISCONNECT_KICK_AFTER_WARNING_MS);
+  };
+
+  if (stageOneRemaining === 0) {
+    triggerConnectionLostStage();
+    return;
+  }
+
+  const stageOneTimer = setTimeout(triggerConnectionLostStage, stageOneRemaining);
+  room.awayDebounceTimers.set(token, stageOneTimer);
 }
 
 function scoreFor(isCorrect, timeLeft, timeLimit, streak) {
@@ -412,7 +519,9 @@ io.on('connection', (socket) => {
     const hostSessionToken = uuidv4();
     room.hostSessionToken = hostSessionToken;
     room.kickedTokens = new Set();
+    room.timedOutTokens = new Set();
     room.disconnectGraceTimers = new Map();
+    room.awayDebounceTimers = new Map();
     room.chatMessages = [];
     room.lastChatAt = new Map();
     room.lastReactionAt = new Map();
@@ -491,6 +600,9 @@ io.on('connection', (socket) => {
     }
 
     if (!isHost && !player) {
+      if (sessionToken && room.timedOutTokens?.has(sessionToken)) {
+        return cb && cb({ ok: false, disconnectedTimeout: true, message: 'Disconnected' });
+      }
       return cb && cb({ ok: false, message: 'You are no longer in this game.' });
     }
 
@@ -503,12 +615,7 @@ io.on('connection', (socket) => {
     }
 
     const token = isHost ? room.hostSessionToken : player.sessionToken;
-    if (token && room.disconnectGraceTimers && room.disconnectGraceTimers.has(token)) {
-      clearTimeout(room.disconnectGraceTimers.get(token));
-      room.disconnectGraceTimers.delete(token);
-    }
-
-    const graceMs = room.state === 'lobby' ? 120000 : 30000;
+    clearPlayerPresenceTimers(room, token || player?.id);
 
     if (isHost) {
       clearTimeout(room.hostGraceTimer);
@@ -519,6 +626,7 @@ io.on('connection', (socket) => {
       const oldId = player.id;
       player.id = socket.id;
       player.connected = true;
+      player.disconnectedAt = null;
 
       if (room.answers instanceof Map && room.answers.has(oldId)) {
         const answer = room.answers.get(oldId);
@@ -573,14 +681,12 @@ io.on('connection', (socket) => {
     if (target.sessionToken) {
       if (!room.kickedTokens) room.kickedTokens = new Set();
       room.kickedTokens.add(target.sessionToken);
-      if (room.disconnectGraceTimers && room.disconnectGraceTimers.has(target.sessionToken)) {
-        clearTimeout(room.disconnectGraceTimers.get(target.sessionToken));
-        room.disconnectGraceTimers.delete(target.sessionToken);
-      }
+      clearPlayerPresenceTimers(room, target.sessionToken);
     }
+    clearPlayerPresenceTimers(room, playerId);
 
     room.players = room.players.filter((p) => p.id !== playerId);
-    io.to(playerId).emit('kicked');
+    io.to(playerId).emit('kicked', { message: 'You were removed from the lobby.' });
     io.sockets.sockets.get(playerId)?.leave(room.pin);
     io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
     io.to(room.pin).emit('toast', { text: `${target.name} was removed`, tone: 'warn' });
@@ -592,10 +698,7 @@ io.on('connection', (socket) => {
     const player = room.players.find((p) => p.id === socket.id);
     if (!player || player.isHost) return;
 
-    if (player.sessionToken && room.disconnectGraceTimers && room.disconnectGraceTimers.has(player.sessionToken)) {
-      clearTimeout(room.disconnectGraceTimers.get(player.sessionToken));
-      room.disconnectGraceTimers.delete(player.sessionToken);
-    }
+    clearPlayerPresenceTimers(room, player.sessionToken || player.id);
 
     room.players = room.players.filter((p) => p.id !== socket.id);
     socket.leave(room.pin);
@@ -617,10 +720,7 @@ io.on('connection', (socket) => {
     if (!room || !authorized) return;
 
     clearRoomTimers(room);
-    if (room.disconnectGraceTimers) {
-      room.disconnectGraceTimers.forEach((t) => clearTimeout(t));
-      room.disconnectGraceTimers.clear();
-    }
+    clearAllRoomPresenceTimers(room);
     clearTimeout(room.hostGraceTimer);
 
     io.to(room.pin).emit('roomClosed', { message: 'Host closed the lobby.' });
@@ -1430,7 +1530,32 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('playerPresence', ({ away } = {}, cb) => {
+    const room = rooms.get(socket.data.pin);
+    if (!room) return cb && cb({ ok: false, disconnectedTimeout: true, message: 'Disconnected' });
+    if (room.hostId === socket.id) return cb && cb({ ok: true });
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) {
+      return cb && cb({ ok: false, disconnectedTimeout: true, message: 'Disconnected' });
+    }
+
+    const token = player.sessionToken || player.id;
+    if (away) {
+      startDisconnectCountdown(room, player, 0);
+      return cb && cb({ ok: true });
+    }
+
+    clearPlayerPresenceTimers(room, token);
+    player.disconnectedAt = null;
+    if (!player.connected) {
+      player.connected = true;
+      io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
+    }
+    if (cb) cb({ ok: true });
+  });
+
+  socket.on('disconnect', (reason) => {
     const room = rooms.get(socket.data.pin);
     if (!room) return;
 
@@ -1438,49 +1563,23 @@ io.on('connection', (socket) => {
     const player = !isHost ? room.players.find((p) => p.id === socket.id) : null;
     if (!isHost && !player) return;
 
-    const graceMs = room.state === 'lobby' ? 120000 : 30000;
-
     if (isHost) {
+      const hostGraceMs = room.state === 'lobby' ? 120000 : 30000;
       clearTimeout(room.hostGraceTimer);
       room.hostGraceTimer = setTimeout(() => {
         const current = rooms.get(room.pin);
         if (current && current.hostId === socket.id) {
           io.to(room.pin).emit('hostLeft');
           clearRoomTimers(current);
-          if (current.disconnectGraceTimers) {
-            current.disconnectGraceTimers.forEach((t) => clearTimeout(t));
-          }
+          clearAllRoomPresenceTimers(current);
           rooms.delete(room.pin);
         }
-      }, graceMs);
+      }, hostGraceMs);
       return;
     }
 
-    player.connected = false;
-    player.heistTarget = null;
-    room.players.forEach((p) => { if (p.heistTarget === player.id) p.heistTarget = null; });
-    io.to(room.pin).emit('roomUpdate', roomSnapshot(room));
-
-    // 15-second grace window before purging disconnected player
-    const token = player.sessionToken || player.id;
-    if (!room.disconnectGraceTimers) room.disconnectGraceTimers = new Map();
-    if (room.disconnectGraceTimers.has(token)) {
-      clearTimeout(room.disconnectGraceTimers.get(token));
-    }
-
-    const graceTimer = setTimeout(() => {
-      const liveRoom = rooms.get(room.pin);
-      if (!liveRoom) return;
-      const targetP = liveRoom.players.find((p) => (p.sessionToken && p.sessionToken === token) || p.id === player.id);
-      if (targetP && !targetP.connected) {
-        liveRoom.players = liveRoom.players.filter((p) => p !== targetP);
-        liveRoom.disconnectGraceTimers.delete(token);
-        io.to(liveRoom.pin).emit('roomUpdate', roomSnapshot(liveRoom));
-        io.to(liveRoom.pin).emit('toast', { text: `${targetP.name} left`, tone: 'warn' });
-      }
-    }, graceMs);
-
-    room.disconnectGraceTimers.set(token, graceTimer);
+    const pingElapsedMs = reason === 'ping timeout' ? 15000 : 0;
+    startDisconnectCountdown(room, player, pingElapsedMs);
   });
 });
 
@@ -1604,7 +1703,8 @@ app.post('/api/question-sets', async (req, res) => {
       createdAt: entry.createdAt,
       questionCount: entry.questionCount,
       isPublic: false,
-      isOwner: true
+      isOwner: true,
+      canDelete: true
     });
   } catch (err) {
     console.error('[Question Set Save Error]:', err);
@@ -1628,10 +1728,10 @@ app.delete('/api/question-sets/:id', async (req, res) => {
       return res.status(401).json({ error: 'Please sign in to delete quiz packs.' });
     }
     const result = await questionsStore.deleteSet(req.params.id, { userId, authEnabled });
-    if (result.ok) await purgeOrphanImages(rooms);
+    if (result.ok && !result.hiddenForUser) await purgeOrphanImages(rooms);
     if (!result.ok) {
       if (result.reason === 'forbidden') {
-        return res.status(403).json({ error: 'You can only delete your own private quiz packs.' });
+        return res.status(403).json({ error: 'You cannot delete this quiz pack right now.' });
       }
       return res.status(404).json({ error: 'not found' });
     }

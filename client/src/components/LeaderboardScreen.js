@@ -60,8 +60,21 @@ function LeaderboardScreen({ socket, gameState, room, pin, playerId }) {
 
   return (
     <div className="screen-center">
-      <div className="card" style={{ maxWidth: 600 }}>
-        <h2 style={{ textAlign: 'center', marginBottom: 24 }}>Leaderboard</h2>
+      <motion.div
+        className="card"
+        style={{ maxWidth: 600, width: '100%' }}
+        initial={{ opacity: 0, scale: 0.9, y: 24 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+      >
+        <motion.h2
+          initial={{ scale: 0.85, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+          style={{ textAlign: 'center', marginBottom: 24 }}
+        >
+          🏅 Leaderboard
+        </motion.h2>
 
         <table className="leaderboard-table">
           <thead>
@@ -102,10 +115,10 @@ function LeaderboardScreen({ socket, gameState, room, pin, playerId }) {
                 return (
                   <motion.tr
                     key={p.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
+                    initial={{ opacity: 0, x: -24, scale: 0.95 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
                     exit={{ opacity: 0, x: 20 }}
-                    transition={{ delay: i * 0.1 }}
+                    transition={{ delay: i * 0.08, type: 'spring', stiffness: 320, damping: 22 }}
                     style={{
                       background: bgColor,
                       fontWeight: isMe ? 'bold' : 'normal',
@@ -149,7 +162,7 @@ function LeaderboardScreen({ socket, gameState, room, pin, playerId }) {
             Next Question ({countdown}s)
           </motion.button>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }

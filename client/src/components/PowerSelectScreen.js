@@ -62,7 +62,13 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
   if (isHost) {
     return (
       <div className="screen-center">
-        <div className="card" style={{ textAlign: 'center', maxWidth: 600 }}>
+        <motion.div
+          className="card"
+          style={{ textAlign: 'center', maxWidth: 600, width: '100%' }}
+          initial={{ opacity: 0, scale: 0.92, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ type: 'spring', stiffness: 310, damping: 24 }}
+        >
           <h2 style={{ marginBottom: 8 }}>⏳ Waiting for Players to Choose Powers</h2>
           <p style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--purple)', marginBottom: 16 }}>
             {chosenCount}/{nonHostPlayers.length} players ready
@@ -99,7 +105,7 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
           >
             🚀 Force Start
           </motion.button>
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -111,7 +117,13 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
 
   return (
     <div className="screen-center">
-      <div className="card" style={{ textAlign: 'center', maxWidth: 700 }}>
+      <motion.div
+        className="card"
+        style={{ textAlign: 'center', maxWidth: 700, width: '100%' }}
+        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 310, damping: 24 }}
+      >
         <h2 style={{ marginBottom: 8 }}>Choose Your Power</h2>
         <p style={{ marginBottom: 8, color: 'var(--muted)' }}>{cooldownDesc}</p>
         <p style={{ marginBottom: 24, fontWeight: 700, color: timeLeft <= 30 ? 'var(--red)' : 'var(--purple)' }}>
@@ -167,11 +179,18 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
           </>
         ) : (
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
+            initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 20 }}
             style={{ padding: 32 }}
           >
-            <div style={{ fontSize: '4rem', marginBottom: 16 }}>✅</div>
+            <motion.div
+              style={{ fontSize: '4rem', marginBottom: 16 }}
+              animate={{ scale: [1, 1.18, 1], rotate: [0, -8, 6, 0] }}
+              transition={{ duration: 0.6 }}
+            >
+              ✅
+            </motion.div>
             <h3 style={{ marginBottom: 8 }}>Power Locked In!</h3>
             <p style={{ color: 'var(--muted)', marginBottom: 16 }}>Waiting for other players...</p>
             <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--purple)' }}>
@@ -179,7 +198,7 @@ function PowerSelectScreen({ socket, room, pin, playerId }) {
             </div>
           </motion.div>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }

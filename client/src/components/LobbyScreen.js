@@ -13,6 +13,7 @@ import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion
 import { resolveImageUrl, compressImage, preloadImages } from '../utils/imageUrl';
 import { downloadJsonPack, parseImportedPack } from '../utils/questionPack';
 import { useAppAuth } from '../auth/AuthContext';
+import CartoonSelect from './CartoonSelect';
 
 const serverUrl = process.env.REACT_APP_SERVER_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
 
@@ -59,6 +60,45 @@ function formatTimeBadge(sec) {
   const mins = Math.floor(total / 60);
   const rem = total % 60;
   return rem === 0 ? `${mins}m` : `${mins}m ${rem}s`;
+}
+
+/**
+ * Smoothly animates container height when inner content changes (tabs, drawers, dynamic fields)
+ * without distorting borders/text, while giving child shadows breathing room to prevent clipping.
+ */
+function SmoothHeight({ children, style = {} }) {
+  const innerRef = useRef(null);
+  const [height, setHeight] = useState(undefined);
+  const readyRef = useRef(false);
+
+  useEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+    const measure = () => setHeight(el.scrollHeight);
+    measure();
+    const raf = requestAnimationFrame(() => { readyRef.current = true; });
+    if (typeof ResizeObserver === 'undefined') {
+      return () => cancelAnimationFrame(raf);
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, []);
+
+  return (
+    <motion.div
+      animate={height !== undefined ? { height } : undefined}
+      transition={readyRef.current ? { type: 'spring', stiffness: 320, damping: 30, mass: 0.85 } : { duration: 0 }}
+      style={{ overflow: 'hidden', margin: '-6px -8px -10px', ...style }}
+    >
+      <div ref={innerRef} style={{ padding: '6px 8px 10px' }}>
+        {children}
+      </div>
+    </motion.div>
+  );
 }
 
 function useCustomTimePicker(value, onChange) {
@@ -124,25 +164,35 @@ function useCustomTimePicker(value, onChange) {
   };
 }
 
+const TIME_PRESET_OPTIONS = [
+  ...TIME_PRESETS,
+  { value: 'custom', label: '⏱️ Custom...' }
+];
+
+const DURATION_UNIT_OPTIONS = [
+  { value: 'sec', label: 'seconds' },
+  { value: 'min', label: 'minutes' }
+];
+
 function TimePresetSelect({ value, isCustom, onChange }) {
   return (
-    <select
-      className="input"
+    <CartoonSelect
       value={isCustom ? 'custom' : (TIME_PRESET_VALUES.includes(Number(value)) ? Number(value) : 'custom')}
+      options={TIME_PRESET_OPTIONS}
       onChange={onChange}
-      style={{ width: '100%', minWidth: 0 }}
-    >
-      {TIME_PRESETS.map((t) => (
-        <option key={t.value} value={t.value}>{t.label}</option>
-      ))}
-      <option value="custom">Custom...</option>
-    </select>
+      ariaLabel="Time preset"
+    />
   );
 }
 
 function CustomDurationRow({ picker, onKeyDown }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 108px', gap: 8, width: '100%' }}>
+    <motion.div
+      initial={{ opacity: 0, x: 10, scale: 0.96 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+      style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 124px', gap: 8, flex: '1 1 210px', minWidth: 0 }}
+    >
       <input
         type="number"
         min={picker.unit === 'min' ? '1' : '5'}
@@ -154,25 +204,25 @@ function CustomDurationRow({ picker, onKeyDown }) {
         onKeyDown={onKeyDown}
         style={{ width: '100%', minWidth: 0 }}
       />
-      <select
-        className="input"
+      <CartoonSelect
         value={picker.unit}
+        options={DURATION_UNIT_OPTIONS}
         onChange={picker.handleUnitChange}
-        style={{ width: '100%', minWidth: 0, padding: '12px 10px' }}
-      >
-        <option value="sec">seconds</option>
-        <option value="min">minutes</option>
-      </select>
-    </div>
+        triggerStyle={{ padding: '11px 10px' }}
+        ariaLabel="Duration unit"
+      />
+    </motion.div>
   );
 }
 
 function TimeLimitPicker({ value, onChange }) {
   const picker = useCustomTimePicker(value, onChange);
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: picker.isCustom ? 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))' : '1fr', gap: 8, width: '100%' }}>
-      <TimePresetSelect value={value} isCustom={picker.isCustom} onChange={picker.handleSelectChange} />
-      {picker.isCustom && <CustomDurationRow picker={picker} />}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%' }}>
+      <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+        <TimePresetSelect value={value} isCustom={picker.isCustom} onChange={picker.handleSelectChange} />
+      </div>
+      {picker.isCustom && <CustomDurationRow key="time-limit-custom" picker={picker} />}
     </div>
   );
 }
@@ -973,16 +1023,33 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
       </div>
 
       {/* Header */}
-      <div className="lobby-header">
+      <motion.div
+        className="lobby-header"
+        initial={{ opacity: 0, y: -18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+      >
         <h1 style={{ fontSize: '2.5rem', color: 'var(--purple)', marginBottom: 4 }}>{room?.gameName || 'FINNIVAL'}</h1>
         <p style={{ fontSize: '1.1rem', marginBottom: 8, fontWeight: 700, color: 'var(--indigo)' }}>
           Share this code with your friends:
         </p>
-        <div className="pin-display">{pin}</div>
+        <motion.div
+          className="pin-display"
+          initial={{ scale: 0.85, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 360, damping: 20, delay: 0.08 }}
+          whileHover={{ scale: 1.04 }}
+        >
+          {pin}
+        </motion.div>
 
         {isHost && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '16px auto 10px', maxWidth: 380 }}>
-            <div
+            <motion.div
+              initial={{ opacity: 0, scale: 0.82 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 22, delay: 0.14 }}
+              whileHover={{ scale: 1.04, rotate: 1 }}
               style={{
                 background: 'white',
                 padding: 10,
@@ -993,30 +1060,17 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
               }}
             >
               <QRCodeSVG value={joinUrl} size={132} level="M" marginSize={2} bgColor="#ffffff" fgColor="#1e1835" />
-            </div>
+            </motion.div>
             <div style={{ marginTop: 8, fontSize: '0.88rem', fontWeight: 700, color: 'var(--indigo)', textAlign: 'center' }}>
-              📷 Scan to auto-join
+              📷 Scan to Join
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', marginTop: 6 }}>
-              <span
-                style={{
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                  color: 'var(--indigo)',
-                  background: 'var(--plum-tint)',
-                  border: '1.5px solid rgba(66, 52, 101, 0.2)',
-                  padding: '4px 10px',
-                  borderRadius: 8,
-                  maxWidth: '100%',
-                  wordBreak: 'break-all'
-                }}
-              >
-                {joinUrl}
-              </span>
-              <button
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+              <motion.button
                 type="button"
                 className={copiedJoinLink ? 'btn btn-success' : 'btn btn-secondary'}
-                style={{ padding: '4px 12px', fontSize: '0.78rem', borderRadius: 8 }}
+                style={{ padding: '6px 16px', fontSize: '0.84rem', borderRadius: 10 }}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={() => {
                   navigator.clipboard?.writeText(joinUrl);
                   setCopiedJoinLink(true);
@@ -1024,7 +1078,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                 }}
               >
                 {copiedJoinLink ? '✅ Copied!' : '📋 Copy Link'}
-              </button>
+              </motion.button>
             </div>
           </div>
         )}
@@ -1100,14 +1154,14 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
             </span>
           </div>
         )}
-      </div>
+      </motion.div>
 
       <div className="lobby-container">
         {/* Players Roster */}
         <h2 style={{ color: 'white', marginBottom: 12 }}>👥 Players ({room?.players.length || 0})</h2>
         {room?.players.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px', marginBottom: 20 }}>
-            Waiting for players to join using PIN <strong>{pin}</strong>...
+            Waiting for players to join...
           </div>
         ) : (
           <div className="player-list" style={{ marginBottom: 20 }}>
@@ -1125,7 +1179,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                   <div className="player-avatar">{p.avatar}</div>
                   <div style={{ fontWeight: 700 }}>{p.name}</div>
                   {p.isHost && <div style={{ fontSize: '0.8rem', color: 'var(--purple)' }}>👑 Host</div>}
-                  {!p.connected && <div style={{ fontSize: '0.8rem', color: 'var(--red)' }}>Disconnected</div>}
+                  {!p.connected && <div style={{ fontSize: '0.8rem', color: 'var(--red)', fontWeight: 700 }}>Connection Lost</div>}
                   {isHost && !p.isHost && (
                     <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
                       <button
@@ -1155,11 +1209,14 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                 </span>
               )}
               {['🔥', '💀', '😭', '😂', '👑', '🪝'].map((emoji) => (
-                <button
+                <motion.button
                   key={emoji}
                   type="button"
                   onClick={() => handleSendReaction(emoji)}
                   disabled={emojiCooldown > 0}
+                  whileHover={emojiCooldown > 0 ? undefined : { scale: 1.18, y: -3, rotate: -6 }}
+                  whileTap={emojiCooldown > 0 ? undefined : { scale: 0.85, rotate: 6 }}
+                  transition={{ type: 'spring', stiffness: 450, damping: 18 }}
                   style={{
                     fontSize: '1.3rem',
                     padding: '4px 9px',
@@ -1171,7 +1228,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                   }}
                 >
                   {emoji}
-                </button>
+                </motion.button>
               ))}
             </div>
           </div>
@@ -1197,15 +1254,23 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                 Say hello while waiting!
               </div>
             ) : (
-              chatMessages.map((msg) => (
-                <div key={msg.id} style={{ display: 'flex', alignItems: 'baseline', gap: 7, fontSize: '0.9rem' }}>
-                  <span>{msg.senderAvatar}</span>
-                  <strong style={{ color: msg.isHost ? 'var(--amber)' : '#ffffff' }}>
-                    {msg.isHost ? 'Host' : msg.senderName}:
-                  </strong>
-                  <span style={{ wordBreak: 'break-word', color: 'rgba(255,255,255,0.92)' }}>{msg.text}</span>
-                </div>
-              ))
+              <AnimatePresence initial={false}>
+                {chatMessages.map((msg) => (
+                  <motion.div
+                    key={msg.id}
+                    initial={{ opacity: 0, x: -12, scale: 0.96 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 24 }}
+                    style={{ display: 'flex', alignItems: 'baseline', gap: 7, fontSize: '0.9rem' }}
+                  >
+                    <span>{msg.senderAvatar}</span>
+                    <strong style={{ color: msg.isHost ? 'var(--amber)' : '#ffffff' }}>
+                      {msg.isHost ? 'Host' : msg.senderName}:
+                    </strong>
+                    <span style={{ wordBreak: 'break-word', color: 'rgba(255,255,255,0.92)' }}>{msg.text}</span>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             )}
           </div>
 
@@ -1245,97 +1310,128 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                 </button>
               </div>
 
-              {showRules && (
-                <div style={{ marginTop: 18, paddingTop: 16, borderTop: '2px dashed rgba(66, 52, 101, 0.18)' }}>
-                  <div style={{ marginBottom: 16 }}>
-                    <label style={{ display: 'block', marginBottom: 8, fontWeight: 800 }}>Power Mode</label>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {[
-                        { id: 'choose', label: '🎮 Players Choose' },
-                        { id: 'random', label: '🎲 Random Powers' },
-                        { id: 'off', label: '🚫 Powers Off' }
-                      ].map((m) => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          className={settings.powerMode === m.id ? 'btn btn-primary' : 'btn btn-secondary'}
-                          style={{ flex: '1 1 140px', padding: '9px 12px', fontSize: '0.9rem', opacity: settings.powerMode === m.id ? 1 : 0.7 }}
-                          onClick={() => updateSettings({ powerMode: m.id })}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <AnimatePresence initial={false}>
+                {showRules && (
+                  <motion.div
+                    key="rules-drawer"
+                    initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                    animate={{ opacity: 1, height: 'auto', transitionEnd: { overflow: 'visible' } }}
+                    exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                    transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                    style={{ margin: '0 -6px -8px' }}
+                  >
+                    <SmoothHeight style={{ margin: 0 }}>
+                      <div style={{ marginTop: 18, paddingTop: 16, paddingBottom: 4, borderTop: '2px dashed rgba(66, 52, 101, 0.18)' }}>
+                        <div style={{ marginBottom: 16 }}>
+                          <label style={{ display: 'block', marginBottom: 8, fontWeight: 800 }}>Power Mode</label>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {[
+                              { id: 'choose', label: '🎮 Players Choose' },
+                              { id: 'random', label: '🎲 Random Powers' },
+                              { id: 'off', label: '🚫 Powers Off' }
+                            ].map((m) => (
+                              <motion.button
+                                key={m.id}
+                                type="button"
+                                className={settings.powerMode === m.id ? 'btn btn-primary' : 'btn btn-secondary'}
+                                style={{ flex: '1 1 140px', padding: '9px 12px', fontSize: '0.9rem', opacity: settings.powerMode === m.id ? 1 : 0.7 }}
+                                onClick={() => updateSettings({ powerMode: m.id })}
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.96 }}
+                              >
+                                {m.label}
+                              </motion.button>
+                            ))}
+                          </div>
+                        </div>
 
-                  {settings.powerMode !== 'off' && (
-                    <div style={{ marginBottom: 16 }}>
-                      <label style={{ display: 'block', marginBottom: 8, fontWeight: 800 }}>Power Cooldown</label>
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: isCustomCooldown ? 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))' : '1fr',
-                          gap: 8,
-                          width: '100%'
-                        }}
-                      >
-                        <select
-                          className="input"
-                          value={isCustomCooldown ? 'custom' : settings.powerCooldownSec}
-                          onChange={(e) => {
-                            if (e.target.value === 'custom') {
-                              const fallbackSec = settings.powerCooldownSec > 0 ? settings.powerCooldownSec : 120;
-                              const useMin = fallbackSec > 60 && fallbackSec % 60 === 0;
-                              setIsCustomCooldown(true);
-                              setCustomCooldownUnit(useMin ? 'min' : 'sec');
-                              setCustomCooldownInput(useMin ? String(fallbackSec / 60) : String(fallbackSec));
-                            } else {
-                              setIsCustomCooldown(false);
-                              updateSettings({ powerCooldownSec: Number(e.target.value) });
-                            }
-                          }}
-                          style={{ width: '100%', minWidth: 0 }}
-                        >
-                          <option value={60}>Fast (60 seconds)</option>
-                          <option value={120}>Normal (120 seconds)</option>
-                          <option value={180}>Slow (180 seconds)</option>
-                          <option value={-1}>Once per game</option>
-                          <option value="custom">Custom...</option>
-                        </select>
-                        {isCustomCooldown && (
-                          <CustomDurationRow
-                            picker={{
-                              unit: customCooldownUnit,
-                              inputVal: customCooldownInput,
-                              handleInputChange: (e) => setCustomCooldownInput(e.target.value),
-                              handleBlur: () => commitCustomCooldown(),
-                              handleUnitChange: handleCooldownUnitChange
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                commitCustomCooldown();
-                              }
-                            }}
-                          />
-                        )}
+                        <AnimatePresence initial={false}>
+                          {settings.powerMode !== 'off' && (
+                            <motion.div
+                              key="power-cooldown-drawer"
+                              initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                              animate={{ opacity: 1, height: 'auto', transitionEnd: { overflow: 'visible' } }}
+                              exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                              transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+                              style={{ margin: '0 -4px' }}
+                            >
+                              <div style={{ padding: '2px 4px 16px' }}>
+                                <label style={{ display: 'block', marginBottom: 8, fontWeight: 800 }}>Power Cooldown</label>
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: 8,
+                                    width: '100%'
+                                  }}
+                                >
+                                  <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+                                    <CartoonSelect
+                                      value={isCustomCooldown ? 'custom' : settings.powerCooldownSec}
+                                      ariaLabel="Power Cooldown"
+                                      options={[
+                                        { value: 60, label: '⚡ Fast (60 seconds)' },
+                                        { value: 120, label: '⚖️ Normal (120 seconds)' },
+                                        { value: 180, label: '🐢 Slow (180 seconds)' },
+                                        { value: -1, label: '🎯 Once per game' },
+                                        { value: 'custom', label: '⏱️ Custom...' }
+                                      ]}
+                                      onChange={(e) => {
+                                        if (e.target.value === 'custom') {
+                                          const fallbackSec = settings.powerCooldownSec > 0 ? settings.powerCooldownSec : 120;
+                                          const useMin = fallbackSec > 60 && fallbackSec % 60 === 0;
+                                          setIsCustomCooldown(true);
+                                          setCustomCooldownUnit(useMin ? 'min' : 'sec');
+                                          setCustomCooldownInput(useMin ? String(fallbackSec / 60) : String(fallbackSec));
+                                        } else {
+                                          setIsCustomCooldown(false);
+                                          updateSettings({ powerCooldownSec: Number(e.target.value) });
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                  {isCustomCooldown && (
+                                    <CustomDurationRow
+                                      key="cooldown-custom-row"
+                                      picker={{
+                                        unit: customCooldownUnit,
+                                        inputVal: customCooldownInput,
+                                        handleInputChange: (e) => setCustomCooldownInput(e.target.value),
+                                        handleBlur: () => commitCustomCooldown(),
+                                        handleUnitChange: handleCooldownUnitChange
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          commitCustomCooldown();
+                                        }
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                          <div style={{ fontWeight: 800 }}>🔀 Shuffle Question Order</div>
+                          <motion.button
+                            type="button"
+                            className={settings.shuffleQuestions ? 'btn btn-success' : 'btn btn-secondary'}
+                            style={{ padding: '7px 18px', fontSize: '0.9rem', minWidth: 100 }}
+                            onClick={() => updateSettings({ shuffleQuestions: !settings.shuffleQuestions })}
+                            whileHover={{ scale: 1.04 }}
+                            whileTap={{ scale: 0.94 }}
+                          >
+                            {settings.shuffleQuestions ? '✅ ON' : 'OFF'}
+                          </motion.button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                    <div style={{ fontWeight: 800 }}>🔀 Shuffle Question Order</div>
-                    <button
-                      type="button"
-                      className={settings.shuffleQuestions ? 'btn btn-success' : 'btn btn-secondary'}
-                      style={{ padding: '7px 18px', fontSize: '0.9rem', minWidth: 100 }}
-                      onClick={() => updateSettings({ shuffleQuestions: !settings.shuffleQuestions })}
-                    >
-                      {settings.shuffleQuestions ? '✅ ON' : 'OFF'}
-                    </button>
-                  </div>
-                </div>
-              )}
+                    </SmoothHeight>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Unified 3-Tab Quiz Builder */}
@@ -1343,610 +1439,738 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
               <h2 style={{ color: 'white', marginBottom: 12 }}>🎯 Build Your Quiz</h2>
               <div className="card" style={{ marginBottom: 24 }}>
                 <div className="lobby-tabs">
-                  <button
-                    type="button"
-                    className={`lobby-tab-btn ${builderTab === 'ai' ? 'active' : ''}`}
-                    onClick={() => setBuilderTab('ai')}
-                  >
-                    ✨ AI Quiz
-                  </button>
-                  <button
-                    type="button"
-                    className={`lobby-tab-btn ${builderTab === 'manual' ? 'active' : ''}`}
-                    onClick={() => setBuilderTab('manual')}
-                  >
-                    ✏️ {editingIndex !== null ? `Editing #${editingIndex + 1}` : 'Add Manually'}
-                  </button>
-                  <button
-                    type="button"
-                    className={`lobby-tab-btn ${builderTab === 'saved' ? 'active' : ''}`}
-                    onClick={() => setBuilderTab('saved')}
-                  >
-                    📚 Saved ({savedSets.length})
-                  </button>
+                  {[
+                    { id: 'ai', label: '✨ AI Quiz' },
+                    { id: 'manual', label: `✏️ ${editingIndex !== null ? `Editing #${editingIndex + 1}` : 'Add Manually'}` },
+                    { id: 'saved', label: `📚 Saved (${savedSets.length})` }
+                  ].map((tab) => {
+                    const active = builderTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        className={`lobby-tab-btn ${active ? 'active' : ''}`}
+                        onClick={() => setBuilderTab(tab.id)}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="lobbyBuilderTabPill"
+                            className="lobby-tab-pill"
+                            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                          />
+                        )}
+                        <span className="lobby-tab-label">{tab.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {/* TAB 1: AI QUIZ GENERATOR */}
-                {builderTab === 'ai' && (
-                  <div>
-                    <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Topic</label>
-                    <input
-                      className="input"
-                      placeholder="e.g. Ocean wildlife, World capitals, 90s anime, Database basics..."
-                      value={aiTopic}
-                      onChange={(e) => setAiTopic(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleGenerateAiQuiz();
-                        }
-                      }}
-                      style={{ width: '100%', marginBottom: 14 }}
-                    />
-
-                    <label style={{ display: 'block', marginBottom: 8, fontWeight: 800 }}>Question Types</label>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-                      {[
-                        { id: 'classic', label: '🟦 Choice' },
-                        { id: 'short_answer', label: '✍️ Short Answer' },
-                        { id: 'slider', label: '🌡️ Slider' },
-                        { id: 'match', label: '🔗 Match' }
-                      ].map((t) => {
-                        const active = aiTypes.includes(t.id);
-                        return (
-                          <button
-                            key={t.id}
-                            type="button"
-                            className={active ? 'btn btn-primary' : 'btn btn-secondary'}
-                            style={{ flex: '1 1 120px', padding: '8px 10px', fontSize: '0.88rem', opacity: active ? 1 : 0.58 }}
-                            onClick={() => toggleAiType(t.id)}
-                          >
-                            {active ? '✓ ' : ''}{t.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 10, marginBottom: (isCustomAiCount || aiTimePicker.isCustom) ? 10 : 16 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>Questions</label>
-                        <select
-                          className="input"
-                          value={isCustomAiCount ? 'custom' : aiCount}
-                          onChange={(e) => {
-                            if (e.target.value === 'custom') {
-                              setIsCustomAiCount(true);
-                              setCustomAiCountInput(String(aiCount));
-                            } else {
-                              setIsCustomAiCount(false);
-                              setAiCount(Number(e.target.value));
-                            }
-                          }}
-                          style={{ width: '100%', minWidth: 0 }}
-                        >
-                          {[5, 10, 15, 20, 25].map((n) => (
-                            <option key={n} value={n}>{n} questions</option>
-                          ))}
-                          <option value="custom">Custom...</option>
-                        </select>
-                      </div>
-
-                      <div style={{ minWidth: 0 }}>
-                        <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>Difficulty</label>
-                        <select className="input" value={aiDifficulty} onChange={(e) => setAiDifficulty(e.target.value)} style={{ width: '100%', minWidth: 0 }}>
-                          <option value="mixed">Mixed</option>
-                          <option value="easy">Easy</option>
-                          <option value="medium">Medium</option>
-                          <option value="hard">Hard</option>
-                        </select>
-                      </div>
-
-                      <div style={{ minWidth: 0 }}>
-                        <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>Time Each</label>
-                        <TimePresetSelect
-                          value={aiTimeLimit}
-                          isCustom={aiTimePicker.isCustom}
-                          onChange={aiTimePicker.handleSelectChange}
-                        />
-                      </div>
-                    </div>
-
-                    {(isCustomAiCount || aiTimePicker.isCustom) && (
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
-                          gap: 10,
-                          marginBottom: 16,
-                          padding: 12,
-                          background: 'var(--cream)',
-                          borderRadius: 12,
-                          border: '2px dashed rgba(66, 52, 101, 0.25)'
+                <SmoothHeight>
+                  <AnimatePresence mode="wait">
+                  {/* TAB 1: AI QUIZ GENERATOR */}
+                  {builderTab === 'ai' && (
+                    <motion.div
+                      key="tab-ai"
+                      initial={{ opacity: 0, y: 12, scale: 0.985 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.985 }}
+                      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+                    >
+                      <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Topic</label>
+                      <input
+                        className="input"
+                        placeholder="e.g. Ocean wildlife, World capitals, 90s anime, Database basics..."
+                        value={aiTopic}
+                        onChange={(e) => setAiTopic(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleGenerateAiQuiz();
+                          }
                         }}
-                      >
-                        {isCustomAiCount && (
-                          <div style={{ minWidth: 0 }}>
-                            <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>Custom Questions (1–25)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              max="25"
-                              className="input"
-                              value={customAiCountInput}
-                              onChange={(e) => setCustomAiCountInput(e.target.value)}
-                              onBlur={() => {
-                                const clamped = Math.min(25, Math.max(1, Math.round(Number(customAiCountInput)) || 10));
-                                setCustomAiCountInput(String(clamped));
-                                setAiCount(clamped);
-                              }}
-                              style={{ width: '100%', minWidth: 0 }}
-                              placeholder="1-25"
-                            />
-                          </div>
-                        )}
-                        {aiTimePicker.isCustom && (
-                          <div style={{ minWidth: 0 }}>
-                            <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>⏱️ Custom Time Each</label>
-                            <CustomDurationRow picker={aiTimePicker} />
-                          </div>
-                        )}
+                        style={{ width: '100%', marginBottom: 14 }}
+                      />
+
+                      <label style={{ display: 'block', marginBottom: 8, fontWeight: 800 }}>Question Types</label>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+                        {[
+                          { id: 'classic', label: '🟦 Choice' },
+                          { id: 'short_answer', label: '✍️ Short Answer' },
+                          { id: 'slider', label: '🌡️ Slider' },
+                          { id: 'match', label: '🔗 Match' }
+                        ].map((t) => {
+                          const active = aiTypes.includes(t.id);
+                          return (
+                            <motion.button
+                              key={t.id}
+                              type="button"
+                              className={active ? 'btn btn-primary' : 'btn btn-secondary'}
+                              style={{ flex: '1 1 120px', padding: '8px 10px', fontSize: '0.88rem', opacity: active ? 1 : 0.58 }}
+                              onClick={() => toggleAiType(t.id)}
+                              whileHover={{ scale: 1.03 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              {active ? '✓ ' : ''}{t.label}
+                            </motion.button>
+                          );
+                        })}
                       </div>
-                    )}
 
-                    <button
-                      type="button"
-                      className="btn btn-success"
-                      onClick={handleGenerateAiQuiz}
-                      disabled={!aiTopic.trim() || aiGenerating}
-                      style={{ width: '100%', fontSize: '1.05rem' }}
-                    >
-                      {aiGenerating
-                        ? `⏳ Generating ${resolvedAiCount} questions...`
-                        : `✨ Generate ${resolvedAiCount} Questions`}
-                    </button>
-
-                    {aiResultMsg && (
-                      <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: 'rgba(61,190,139,0.16)', color: 'var(--indigo-deep)', fontWeight: 700, fontSize: '0.9rem' }}>
-                        ✅ {aiResultMsg}
-                      </div>
-                    )}
-                    {aiError && (
-                      <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: 'rgba(229,72,77,0.12)', color: 'var(--red)', fontWeight: 700, fontSize: '0.9rem' }}>
-                        ⚠️ {aiError}
-                      </div>
-                    )}
-                    {pendingImport?.source === 'ai' && (
-                      <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: 'var(--amber-tint)', border: '2px solid var(--orange)' }}>
-                        <div style={{ fontWeight: 800, marginBottom: 8 }}>
-                          Generated {pendingImport.questions.length} questions! Replace your current {questions.length}, or add them together?
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <button type="button" className="btn btn-danger" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => applyPendingImport('replace')}>
-                            Replace Current
-                          </button>
-                          <button type="button" className="btn btn-success" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => applyPendingImport('append')}>
-                            Add to Current
-                          </button>
-                          <button type="button" className="btn btn-secondary" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => setPendingImport(null)}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* TAB 2: MANUAL QUESTION EDITOR */}
-                {builderTab === 'manual' && (
-                  <div>
-                    {editingIndex !== null && (
-                      <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 10, background: 'var(--amber-tint)', border: '2px solid var(--orange)', fontWeight: 800, fontSize: '0.9rem' }}>
-                        ✏️ Editing Question #{editingIndex + 1}
-                      </div>
-                    )}
-
-                    <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Question Type</label>
-                    <select
-                      className="input"
-                      value={newQuestion.type || 'classic'}
-                      onChange={(e) => setNewQuestion({ ...newQuestion, type: e.target.value })}
-                      style={{ width: '100%', marginBottom: 12 }}
-                    >
-                      <option value="classic">🟦 Multiple Choice</option>
-                      <option value="short_answer">✍️ Short Answer</option>
-                      <option value="slider">🌡️ Number Slider</option>
-                      <option value="match">🔗 Match Pairs</option>
-                    </select>
-
-                    <input
-                      className="input"
-                      placeholder="Write your question..."
-                      value={newQuestion.text}
-                      onChange={(e) => setNewQuestion({ ...newQuestion, text: e.target.value })}
-                      style={{ width: '100%', marginBottom: 12 }}
-                    />
-
-                    {/* Optional Image (right below question, matching gameplay order) */}
-                    <div style={{ marginBottom: 14, padding: 12, background: 'var(--cream)', borderRadius: 10, border: '2px dashed rgba(66, 52, 101, 0.25)' }}>
-                      <label style={{ display: 'block', marginBottom: 6, fontWeight: 800, fontSize: '0.9rem' }}>
-                        📷 Image (Optional)
-                      </label>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <input
-                          className="input"
-                          placeholder="Paste image URL..."
-                          value={newQuestion.imageUrl || ''}
-                          onChange={(e) => {
-                            setNewQuestion({ ...newQuestion, imageUrl: e.target.value });
-                            setImageError(false);
-                          }}
-                          style={{ flex: '1 1 160px', minWidth: 0, margin: 0 }}
-                        />
-                        <label className="btn btn-secondary" style={{ cursor: uploadingImage ? 'wait' : 'pointer', margin: 0, padding: '9px 14px', fontSize: '0.88rem', whiteSpace: 'nowrap' }}>
-                          {uploadingImage ? '⏳ Uploading...' : '📁 Upload'}
-                          <input
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp,image/gif"
-                            style={{ display: 'none' }}
-                            disabled={uploadingImage}
-                            onChange={handleImageUpload}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 10, marginBottom: (isCustomAiCount || aiTimePicker.isCustom) ? 10 : 16 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>Questions</label>
+                          <CartoonSelect
+                            value={isCustomAiCount ? 'custom' : aiCount}
+                            ariaLabel="Questions count"
+                            options={[
+                              ...[5, 10, 15, 20, 25].map((n) => ({ value: n, label: `${n} questions` })),
+                              { value: 'custom', label: '✏️ Custom...' }
+                            ]}
+                            onChange={(e) => {
+                              if (e.target.value === 'custom') {
+                                setIsCustomAiCount(true);
+                                setCustomAiCountInput(String(aiCount));
+                              } else {
+                                setIsCustomAiCount(false);
+                                setAiCount(Number(e.target.value));
+                              }
+                            }}
                           />
+                        </div>
+
+                        <div style={{ minWidth: 0 }}>
+                          <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>Difficulty</label>
+                          <CartoonSelect
+                            value={aiDifficulty}
+                            ariaLabel="Difficulty"
+                            options={[
+                              { value: 'mixed', label: '🎲 Mixed' },
+                              { value: 'easy', label: '🟢 Easy' },
+                              { value: 'medium', label: '🟡 Medium' },
+                              { value: 'hard', label: '🔴 Hard' }
+                            ]}
+                            onChange={(e) => setAiDifficulty(e.target.value)}
+                          />
+                        </div>
+
+                        <div style={{ minWidth: 0 }}>
+                          <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>Time Each</label>
+                          <TimePresetSelect
+                            value={aiTimeLimit}
+                            isCustom={aiTimePicker.isCustom}
+                            onChange={aiTimePicker.handleSelectChange}
+                          />
+                        </div>
+                      </div>
+
+                      <AnimatePresence>
+                        {(isCustomAiCount || aiTimePicker.isCustom) && (
+                          <motion.div
+                            key="ai-custom-tray"
+                            initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                            transition={{ type: 'spring', stiffness: 380, damping: 26 }}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
+                              gap: 10,
+                              marginBottom: 16,
+                              padding: 12,
+                              background: 'var(--cream)',
+                              borderRadius: 12,
+                              border: '2px dashed rgba(66, 52, 101, 0.25)'
+                            }}
+                          >
+                            {isCustomAiCount && (
+                              <div style={{ minWidth: 0 }}>
+                                <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>Custom Questions (1–25)</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="25"
+                                  className="input"
+                                  value={customAiCountInput}
+                                  onChange={(e) => setCustomAiCountInput(e.target.value)}
+                                  onBlur={() => {
+                                    const clamped = Math.min(25, Math.max(1, Math.round(Number(customAiCountInput)) || 10));
+                                    setCustomAiCountInput(String(clamped));
+                                    setAiCount(clamped);
+                                  }}
+                                  style={{ width: '100%', minWidth: 0 }}
+                                  placeholder="1-25"
+                                />
+                              </div>
+                            )}
+                            {aiTimePicker.isCustom && (
+                              <div style={{ minWidth: 0 }}>
+                                <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.85rem' }}>⏱️ Custom Time Each</label>
+                                <CustomDurationRow picker={aiTimePicker} />
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <motion.button
+                        type="button"
+                        className="btn btn-success"
+                        onClick={handleGenerateAiQuiz}
+                        disabled={!aiTopic.trim() || aiGenerating}
+                        whileHover={!aiTopic.trim() || aiGenerating ? undefined : { scale: 1.02 }}
+                        whileTap={!aiTopic.trim() || aiGenerating ? undefined : { scale: 0.97 }}
+                        style={{ width: '100%', fontSize: '1.05rem' }}
+                      >
+                        {aiGenerating
+                          ? `⏳ Generating ${resolvedAiCount} questions...`
+                          : `✨ Generate ${resolvedAiCount} Questions`}
+                      </motion.button>
+
+                      <AnimatePresence>
+                        {aiResultMsg && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            style={{ marginTop: 12, padding: 10, borderRadius: 8, background: 'rgba(61,190,139,0.16)', color: 'var(--indigo-deep)', fontWeight: 700, fontSize: '0.9rem' }}
+                          >
+                            ✅ {aiResultMsg}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      <AnimatePresence>
+                        {aiError && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            style={{ marginTop: 12, padding: 10, borderRadius: 8, background: 'rgba(229,72,77,0.12)', color: 'var(--red)', fontWeight: 700, fontSize: '0.9rem' }}
+                          >
+                            ⚠️ {aiError}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      <AnimatePresence>
+                        {pendingImport?.source === 'ai' && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.96 }}
+                            style={{ marginTop: 12, padding: 12, borderRadius: 12, background: 'var(--amber-tint)', border: '2px solid var(--orange)' }}
+                          >
+                            <div style={{ fontWeight: 800, marginBottom: 8 }}>
+                              Generated {pendingImport.questions.length} questions! Replace your current {questions.length}, or add them together?
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <button type="button" className="btn btn-danger" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => applyPendingImport('replace')}>
+                                Replace Current
+                              </button>
+                              <button type="button" className="btn btn-success" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => applyPendingImport('append')}>
+                                Add to Current
+                              </button>
+                              <button type="button" className="btn btn-secondary" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => setPendingImport(null)}>
+                                Cancel
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  )}
+
+                  {/* TAB 2: MANUAL QUESTION EDITOR */}
+                  {builderTab === 'manual' && (
+                    <motion.div
+                      key="tab-manual"
+                      initial={{ opacity: 0, y: 12, scale: 0.985 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.985 }}
+                      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+                    >
+                      {editingIndex !== null && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.96 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 10, background: 'var(--amber-tint)', border: '2px solid var(--orange)', fontWeight: 800, fontSize: '0.9rem' }}
+                        >
+                          ✏️ Editing Question #{editingIndex + 1}
+                        </motion.div>
+                      )}
+
+                      <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Question Type</label>
+                      <CartoonSelect
+                        value={newQuestion.type || 'classic'}
+                        ariaLabel="Question Type"
+                        style={{ marginBottom: 12 }}
+                        options={[
+                          { value: 'classic', label: '🟦 Multiple Choice' },
+                          { value: 'short_answer', label: '✍️ Short Answer' },
+                          { value: 'slider', label: '🌡️ Number Slider' },
+                          { value: 'match', label: '🔗 Match Pairs' }
+                        ]}
+                        onChange={(e) => setNewQuestion({ ...newQuestion, type: e.target.value })}
+                      />
+
+                      <input
+                        className="input"
+                        placeholder="Write your question..."
+                        value={newQuestion.text}
+                        onChange={(e) => setNewQuestion({ ...newQuestion, text: e.target.value })}
+                        style={{ width: '100%', marginBottom: 12 }}
+                      />
+
+                      {/* Optional Image (right below question, matching gameplay order) */}
+                      <div style={{ marginBottom: 14, padding: 12, background: 'var(--cream)', borderRadius: 10, border: '2px dashed rgba(66, 52, 101, 0.25)' }}>
+                        <label style={{ display: 'block', marginBottom: 6, fontWeight: 800, fontSize: '0.9rem' }}>
+                          📷 Image (Optional)
                         </label>
-                        {newQuestion.imageUrl && (
-                          <button
-                            type="button"
-                            className="btn btn-danger"
-                            style={{ padding: '9px 12px', margin: 0, fontSize: '0.85rem' }}
-                            onClick={() => {
-                              setNewQuestion({ ...newQuestion, imageUrl: '' });
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <input
+                            className="input"
+                            placeholder="Paste image URL..."
+                            value={newQuestion.imageUrl || ''}
+                            onChange={(e) => {
+                              setNewQuestion({ ...newQuestion, imageUrl: e.target.value });
                               setImageError(false);
                             }}
-                          >
-                            ✕ Clear
-                          </button>
-                        )}
-                      </div>
-                      {imageUploadError && (
-                        <div style={{ color: 'var(--red)', fontSize: '0.85rem', fontWeight: 700, marginTop: 6 }}>
-                          ⚠️ {imageUploadError}
-                        </div>
-                      )}
-                      {newQuestion.imageUrl && (
-                        <div style={{ marginTop: 10 }}>
-                          <img
-                            src={resolveImageUrl(newQuestion.imageUrl)}
-                            alt="Preview"
-                            onError={() => setImageError(true)}
-                            onLoad={() => setImageError(false)}
-                            style={{ maxHeight: 110, maxWidth: '100%', borderRadius: 8, border: '2px solid var(--indigo-deep)', objectFit: 'contain', display: imageError ? 'none' : 'block' }}
+                            style={{ flex: '1 1 160px', minWidth: 0, margin: 0 }}
                           />
-                          {imageError && (
-                            <div style={{ color: 'var(--red)', fontSize: '0.85rem', marginTop: 4 }}>
-                              ⚠️ Could not load image preview
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {(!newQuestion.type || newQuestion.type === 'classic') && (
-                      <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <label style={{ fontWeight: 800 }}>Choices</label>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              style={{ padding: '4px 10px', fontSize: '0.82rem' }}
-                              onClick={() => setNewQuestion({ ...newQuestion, options: [...newQuestion.options, ''] })}
-                            >
-                              + Choice
-                            </button>
+                          <label className="btn btn-secondary" style={{ cursor: uploadingImage ? 'wait' : 'pointer', margin: 0, padding: '9px 14px', fontSize: '0.88rem', whiteSpace: 'nowrap' }}>
+                            {uploadingImage ? '⏳ Uploading...' : '📁 Upload'}
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,image/gif"
+                              style={{ display: 'none' }}
+                              disabled={uploadingImage}
+                              onChange={handleImageUpload}
+                            />
+                          </label>
+                          {newQuestion.imageUrl && (
                             <button
                               type="button"
                               className="btn btn-danger"
-                              style={{ padding: '4px 10px', fontSize: '0.82rem' }}
-                              disabled={newQuestion.options.length <= 2}
+                              style={{ padding: '9px 12px', margin: 0, fontSize: '0.85rem' }}
                               onClick={() => {
-                                const nextOpts = newQuestion.options.slice(0, -1);
-                                setNewQuestion({
-                                  ...newQuestion,
-                                  options: nextOpts,
-                                  correctAnswer: Math.min(newQuestion.correctAnswer, nextOpts.length - 1)
-                                });
+                                setNewQuestion({ ...newQuestion, imageUrl: '' });
+                                setImageError(false);
                               }}
                             >
-                              - Remove
+                              ✕ Clear
                             </button>
-                          </div>
+                          )}
                         </div>
-                        {newQuestion.options.map((opt, i) => (
-                          <input
-                            key={i}
-                            className="input"
-                            placeholder={`Choice ${String.fromCharCode(65 + i)}`}
-                            value={opt}
-                            onChange={(e) => {
-                              const opts = [...newQuestion.options];
-                              opts[i] = e.target.value;
-                              setNewQuestion({ ...newQuestion, options: opts });
-                            }}
-                            style={{ width: '100%', marginBottom: 8 }}
-                          />
-                        ))}
-                        <label style={{ display: 'block', marginTop: 8, marginBottom: 6, fontWeight: 800 }}>Correct Choice</label>
-                        <select
-                          className="input"
-                          value={newQuestion.correctAnswer}
-                          onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswer: Number(e.target.value) })}
-                          style={{ width: '100%', marginBottom: 12 }}
-                        >
-                          {newQuestion.options.map((opt, i) => (
-                            <option key={i} value={i}>
-                              Choice {String.fromCharCode(65 + i)}{opt.trim() ? ` — ${opt.trim()}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </>
-                    )}
-
-                    {newQuestion.type === 'short_answer' && (
-                      <>
-                        <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Correct Answer</label>
-                        <input
-                          className="input"
-                          placeholder="e.g. Paris"
-                          value={newQuestion.correctAnswerText || ''}
-                          onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswerText: e.target.value })}
-                          style={{ width: '100%', marginBottom: 12 }}
-                        />
-                      </>
-                    )}
-
-                    {newQuestion.type === 'slider' && (
-                      <>
-                        <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                          <div style={{ flex: 1 }}>
-                            <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Min Value</label>
-                            <input
-                              type="number"
-                              className="input"
-                              value={newQuestion.min ?? 0}
-                              onChange={(e) => setNewQuestion({ ...newQuestion, min: Number(e.target.value) })}
-                              style={{ width: '100%' }}
-                            />
+                        {imageUploadError && (
+                          <div style={{ color: 'var(--red)', fontSize: '0.85rem', fontWeight: 700, marginTop: 6 }}>
+                            ⚠️ {imageUploadError}
                           </div>
-                          <div style={{ flex: 1 }}>
-                            <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Max Value</label>
-                            <input
-                              type="number"
-                              className="input"
-                              value={newQuestion.max ?? 100}
-                              onChange={(e) => setNewQuestion({ ...newQuestion, max: Number(e.target.value) })}
-                              style={{ width: '100%' }}
-                            />
-                          </div>
-                        </div>
-                        <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Exact Target Number</label>
-                        <input
-                          type="number"
-                          className="input"
-                          value={newQuestion.correctNumber ?? 50}
-                          onChange={(e) => setNewQuestion({ ...newQuestion, correctNumber: Number(e.target.value) })}
-                          style={{ width: '100%', marginBottom: 12 }}
-                        />
-                      </>
-                    )}
-
-                    {newQuestion.type === 'match' && (
-                      <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                          <label style={{ fontWeight: 800 }}>Matching Pairs</label>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              style={{ padding: '4px 10px', fontSize: '0.82rem' }}
-                              onClick={() => setNewQuestion({ ...newQuestion, pairs: [...(newQuestion.pairs || []), { left: '', right: '' }] })}
+                        )}
+                        <AnimatePresence>
+                          {newQuestion.imageUrl && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.94 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.94 }}
+                              style={{ marginTop: 10 }}
                             >
-                              + Pair
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-danger"
-                              style={{ padding: '4px 10px', fontSize: '0.82rem' }}
-                              disabled={(newQuestion.pairs?.length || 0) <= 2}
-                              onClick={() => setNewQuestion({ ...newQuestion, pairs: newQuestion.pairs.slice(0, -1) })}
-                            >
-                              - Remove
-                            </button>
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
-                          {(newQuestion.pairs || []).map((p, i) => (
-                            <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', background: 'var(--cream)', padding: 10, borderRadius: 10, border: '2px dashed var(--plum)' }}>
-                              <span style={{ fontWeight: 'bold', width: 26 }}>#{i + 1}</span>
-                              <input
-                                className="input"
-                                placeholder="Left item"
-                                value={p.left}
-                                onChange={(e) => {
-                                  const np = [...newQuestion.pairs];
-                                  np[i] = { ...np[i], left: e.target.value };
-                                  setNewQuestion({ ...newQuestion, pairs: np });
-                                }}
-                                style={{ flex: '1 1 110px', minWidth: 0, margin: 0 }}
+                              <img
+                                src={resolveImageUrl(newQuestion.imageUrl)}
+                                alt="Preview"
+                                onError={() => setImageError(true)}
+                                onLoad={() => setImageError(false)}
+                                style={{ maxHeight: 110, maxWidth: '100%', borderRadius: 8, border: '2px solid var(--indigo-deep)', objectFit: 'contain', display: imageError ? 'none' : 'block' }}
                               />
-                              <span style={{ fontSize: '1.3rem' }}>➔</span>
-                              <input
-                                className="input"
-                                placeholder="Matching answer"
-                                value={p.right}
-                                onChange={(e) => {
-                                  const np = [...newQuestion.pairs];
-                                  np[i] = { ...np[i], right: e.target.value };
-                                  setNewQuestion({ ...newQuestion, pairs: np });
-                                }}
-                                style={{ flex: '1 1 110px', minWidth: 0, margin: 0 }}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-
-                    {/* Time Limit */}
-                    <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Time Limit</label>
-                    <div style={{ marginBottom: 16 }}>
-                      <TimeLimitPicker
-                        key={editorVersion}
-                        value={newQuestion.timeLimit}
-                        onChange={(sec) => setNewQuestion((prev) => ({ ...prev, timeLimit: sec }))}
-                      />
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      <button type="button" className="btn btn-primary" onClick={addQuestion} style={{ flex: 1 }}>
-                        {editingIndex !== null ? '💾 Save Changes' : '+ Add Question'}
-                      </button>
-                      {editingIndex !== null && (
-                        <button type="button" className="btn btn-secondary" onClick={resetManualEditor}>
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* TAB 3: SAVED PACKS & IMPORT */}
-                {builderTab === 'saved' && (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-                      <span style={{ fontWeight: 800, color: 'var(--indigo)' }}>Your Quiz Library</span>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <label className="btn btn-secondary" style={{ padding: '7px 13px', fontSize: '0.84rem', cursor: 'pointer', flex: '1 1 auto', textAlign: 'center' }}>
-                          📥 Import (.json)
-                          <input
-                            type="file"
-                            accept=".json,application/json"
-                            style={{ display: 'none' }}
-                            onChange={handleImportFile}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          style={{ padding: '7px 13px', fontSize: '0.84rem', flex: '1 1 auto' }}
-                          onClick={() => {
-                            setShowPasteImport((prev) => !prev);
-                            setImportError(null);
-                          }}
-                        >
-                          📋 Paste JSON
-                        </button>
+                              {imageError && (
+                                <div style={{ color: 'var(--red)', fontSize: '0.85rem', marginTop: 4 }}>
+                                  ⚠️ Could not load image preview
+                                </div>
+                              )}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
-                    </div>
 
-                    {showPasteImport && (
-                      <div style={{ marginBottom: 14, padding: 12, background: 'var(--cream)', border: '2px dashed var(--plum)', borderRadius: 12 }}>
-                        <textarea
-                          className="input"
-                          rows={5}
-                          placeholder="Paste your quiz JSON here..."
-                          value={pasteImportText}
-                          onChange={(e) => setPasteImportText(e.target.value)}
-                          style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.85rem', marginBottom: 8 }}
-                        />
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            style={{ padding: '6px 14px', fontSize: '0.85rem' }}
-                            onClick={() => processImportedText(pasteImportText)}
+                      <AnimatePresence mode="wait">
+                        {(!newQuestion.type || newQuestion.type === 'classic') && (
+                          <motion.div
+                            key="qtype-classic"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -8 }}
+                            transition={{ duration: 0.18 }}
                           >
-                            Load JSON
-                          </button>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                              <label style={{ fontWeight: 800 }}>Choices</label>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '4px 10px', fontSize: '0.82rem' }}
+                                  onClick={() => setNewQuestion({ ...newQuestion, options: [...newQuestion.options, ''] })}
+                                >
+                                  + Choice
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger"
+                                  style={{ padding: '4px 10px', fontSize: '0.82rem' }}
+                                  disabled={newQuestion.options.length <= 2}
+                                  onClick={() => {
+                                    const nextOpts = newQuestion.options.slice(0, -1);
+                                    setNewQuestion({
+                                      ...newQuestion,
+                                      options: nextOpts,
+                                      correctAnswer: Math.min(newQuestion.correctAnswer, nextOpts.length - 1)
+                                    });
+                                  }}
+                                >
+                                  - Remove
+                                </button>
+                              </div>
+                            </div>
+                            {newQuestion.options.map((opt, i) => (
+                              <input
+                                key={i}
+                                className="input"
+                                placeholder={`Choice ${String.fromCharCode(65 + i)}`}
+                                value={opt}
+                                onChange={(e) => {
+                                  const opts = [...newQuestion.options];
+                                  opts[i] = e.target.value;
+                                  setNewQuestion({ ...newQuestion, options: opts });
+                                }}
+                                style={{ width: '100%', marginBottom: 8 }}
+                              />
+                            ))}
+                            <label style={{ display: 'block', marginTop: 8, marginBottom: 6, fontWeight: 800 }}>Correct Choice</label>
+                            <CartoonSelect
+                              value={newQuestion.correctAnswer}
+                              ariaLabel="Correct Choice"
+                              style={{ marginBottom: 12 }}
+                              options={newQuestion.options.map((opt, i) => ({
+                                value: i,
+                                label: `Choice ${String.fromCharCode(65 + i)}${opt.trim() ? ` — ${opt.trim()}` : ''}`
+                              }))}
+                              onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswer: Number(e.target.value) })}
+                            />
+                          </motion.div>
+                        )}
+
+                        {newQuestion.type === 'short_answer' && (
+                          <motion.div
+                            key="qtype-short"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -8 }}
+                            transition={{ duration: 0.18 }}
+                          >
+                            <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Correct Answer</label>
+                            <input
+                              className="input"
+                              placeholder="e.g. Paris"
+                              value={newQuestion.correctAnswerText || ''}
+                              onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswerText: e.target.value })}
+                              style={{ width: '100%', marginBottom: 12 }}
+                            />
+                          </motion.div>
+                        )}
+
+                        {newQuestion.type === 'slider' && (
+                          <motion.div
+                            key="qtype-slider"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -8 }}
+                            transition={{ duration: 0.18 }}
+                          >
+                            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Min Value</label>
+                                <input
+                                  type="number"
+                                  className="input"
+                                  value={newQuestion.min ?? 0}
+                                  onChange={(e) => setNewQuestion({ ...newQuestion, min: Number(e.target.value) })}
+                                  style={{ width: '100%' }}
+                                />
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Max Value</label>
+                                <input
+                                  type="number"
+                                  className="input"
+                                  value={newQuestion.max ?? 100}
+                                  onChange={(e) => setNewQuestion({ ...newQuestion, max: Number(e.target.value) })}
+                                  style={{ width: '100%' }}
+                                />
+                              </div>
+                            </div>
+                            <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Exact Target Number</label>
+                            <input
+                              type="number"
+                              className="input"
+                              value={newQuestion.correctNumber ?? 50}
+                              onChange={(e) => setNewQuestion({ ...newQuestion, correctNumber: Number(e.target.value) })}
+                              style={{ width: '100%', marginBottom: 12 }}
+                            />
+                          </motion.div>
+                        )}
+
+                        {newQuestion.type === 'match' && (
+                          <motion.div
+                            key="qtype-match"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -8 }}
+                            transition={{ duration: 0.18 }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                              <label style={{ fontWeight: 800 }}>Matching Pairs</label>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '4px 10px', fontSize: '0.82rem' }}
+                                  onClick={() => setNewQuestion({ ...newQuestion, pairs: [...(newQuestion.pairs || []), { left: '', right: '' }] })}
+                                >
+                                  + Pair
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger"
+                                  style={{ padding: '4px 10px', fontSize: '0.82rem' }}
+                                  disabled={(newQuestion.pairs?.length || 0) <= 2}
+                                  onClick={() => setNewQuestion({ ...newQuestion, pairs: newQuestion.pairs.slice(0, -1) })}
+                                >
+                                  - Remove
+                                </button>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+                              {(newQuestion.pairs || []).map((p, i) => (
+                                <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', background: 'var(--cream)', padding: 10, borderRadius: 10, border: '2px dashed var(--plum)' }}>
+                                  <span style={{ fontWeight: 'bold', width: 26 }}>#{i + 1}</span>
+                                  <input
+                                    className="input"
+                                    placeholder="Left item"
+                                    value={p.left}
+                                    onChange={(e) => {
+                                      const np = [...newQuestion.pairs];
+                                      np[i] = { ...np[i], left: e.target.value };
+                                      setNewQuestion({ ...newQuestion, pairs: np });
+                                    }}
+                                    style={{ flex: '1 1 110px', minWidth: 0, margin: 0 }}
+                                  />
+                                  <span style={{ fontSize: '1.3rem' }}>➔</span>
+                                  <input
+                                    className="input"
+                                    placeholder="Matching answer"
+                                    value={p.right}
+                                    onChange={(e) => {
+                                      const np = [...newQuestion.pairs];
+                                      np[i] = { ...np[i], right: e.target.value };
+                                      setNewQuestion({ ...newQuestion, pairs: np });
+                                    }}
+                                    style={{ flex: '1 1 110px', minWidth: 0, margin: 0 }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {/* Time Limit */}
+                      <label style={{ display: 'block', marginBottom: 6, fontWeight: 800 }}>Time Limit</label>
+                      <div style={{ marginBottom: 16 }}>
+                        <TimeLimitPicker
+                          key={editorVersion}
+                          value={newQuestion.timeLimit}
+                          onChange={(sec) => setNewQuestion((prev) => ({ ...prev, timeLimit: sec }))}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <motion.button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={addQuestion}
+                          style={{ flex: 1 }}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.97 }}
+                        >
+                          {editingIndex !== null ? '💾 Save Changes' : '+ Add Question'}
+                        </motion.button>
+                        {editingIndex !== null && (
+                          <motion.button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={resetManualEditor}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.97 }}
+                          >
+                            Cancel
+                          </motion.button>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* TAB 3: SAVED PACKS & IMPORT */}
+                  {builderTab === 'saved' && (
+                    <motion.div
+                      key="tab-saved"
+                      initial={{ opacity: 0, y: 12, scale: 0.985 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.985 }}
+                      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+                        <span style={{ fontWeight: 800, color: 'var(--indigo)' }}>Your Quiz Library</span>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <label className="btn btn-secondary" style={{ padding: '7px 13px', fontSize: '0.84rem', cursor: 'pointer', flex: '1 1 auto', textAlign: 'center' }}>
+                            📥 Import (.json)
+                            <input
+                              type="file"
+                              accept=".json,application/json"
+                              style={{ display: 'none' }}
+                              onChange={handleImportFile}
+                            />
+                          </label>
                           <button
                             type="button"
                             className="btn btn-secondary"
-                            style={{ padding: '6px 14px', fontSize: '0.85rem' }}
-                            onClick={() => { setShowPasteImport(false); setImportError(null); }}
+                            style={{ padding: '7px 13px', fontSize: '0.84rem', flex: '1 1 auto' }}
+                            onClick={() => {
+                              setShowPasteImport((prev) => !prev);
+                              setImportError(null);
+                            }}
                           >
-                            Cancel
+                            📋 Paste JSON
                           </button>
                         </div>
                       </div>
-                    )}
 
-                    {importError && (
-                      <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: 'rgba(229,72,77,0.12)', color: 'var(--red)', fontWeight: 700, fontSize: '0.88rem' }}>
-                        ⚠️ {importError}
-                      </div>
-                    )}
+                      <AnimatePresence initial={false}>
+                        {showPasteImport && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                            animate={{ opacity: 1, height: 'auto', transitionEnd: { overflow: 'visible' } }}
+                            exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                            style={{ margin: '0 -4px' }}
+                          >
+                            <div style={{ padding: '2px 4px 14px' }}>
+                              <div style={{ padding: 12, background: 'var(--cream)', border: '2px dashed var(--plum)', borderRadius: 12 }}>
+                                <textarea
+                                  className="input"
+                                  rows={5}
+                                  placeholder="Paste your quiz JSON here..."
+                                  value={pasteImportText}
+                                  onChange={(e) => setPasteImportText(e.target.value)}
+                                  style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.85rem', marginBottom: 8 }}
+                                />
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+                                    onClick={() => processImportedText(pasteImportText)}
+                                  >
+                                    Load JSON
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+                                    onClick={() => { setShowPasteImport(false); setImportError(null); }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
 
-                    {packMsg && (
-                      <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: 'rgba(61,190,139,0.16)', color: 'var(--indigo-deep)', fontWeight: 700, fontSize: '0.88rem' }}>
-                        {packMsg}
-                      </div>
-                    )}
-
-                    {pendingImport && pendingImport.source !== 'ai' && (
-                      <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: 'var(--amber-tint)', border: '2px solid var(--orange)' }}>
-                        <div style={{ fontWeight: 800, marginBottom: 8 }}>
-                          Ready to import {pendingImport.questions.length} question{pendingImport.questions.length !== 1 ? 's' : ''}{pendingImport.name ? ` ("${pendingImport.name}")` : ''}. Replace your current {questions.length}?
+                      {importError && (
+                        <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: 'rgba(229,72,77,0.12)', color: 'var(--red)', fontWeight: 700, fontSize: '0.88rem' }}>
+                          ⚠️ {importError}
                         </div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <button type="button" className="btn btn-danger" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => applyPendingImport('replace')}>
-                            Replace Current
-                          </button>
-                          <button type="button" className="btn btn-success" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => applyPendingImport('append')}>
-                            Add to Current
-                          </button>
-                          <button type="button" className="btn btn-secondary" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => setPendingImport(null)}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                      )}
 
-                    {savedSets.length === 0 ? (
-                      <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '16px 0' }}>
-                        No saved packs yet. Build a quiz and click Save under Your Quiz!
-                      </p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {savedSets.map((s) => (
-                          <div key={s.id} className="saved-pack-row">
-                            <div className="saved-pack-meta">
-                              <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                <span>{s.name}</span>
-                                {s.isPublic && (
-                                  <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 999, background: 'var(--amber-tint)', color: '#9A3412', fontWeight: 800 }}>
-                                    🌟 Starter
-                                  </span>
+                      {packMsg && (
+                        <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: 'rgba(61,190,139,0.16)', color: 'var(--indigo-deep)', fontWeight: 700, fontSize: '0.88rem' }}>
+                          {packMsg}
+                        </div>
+                      )}
+
+                      {pendingImport && pendingImport.source !== 'ai' && (
+                        <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: 'var(--amber-tint)', border: '2px solid var(--orange)' }}>
+                          <div style={{ fontWeight: 800, marginBottom: 8 }}>
+                            Ready to import {pendingImport.questions.length} question{pendingImport.questions.length !== 1 ? 's' : ''}{pendingImport.name ? ` ("${pendingImport.name}")` : ''}. Replace your current {questions.length}?
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button type="button" className="btn btn-danger" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => applyPendingImport('replace')}>
+                              Replace Current
+                            </button>
+                            <button type="button" className="btn btn-success" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => applyPendingImport('append')}>
+                              Add to Current
+                            </button>
+                            <button type="button" className="btn btn-secondary" style={{ padding: '6px 14px', fontSize: '0.85rem' }} onClick={() => setPendingImport(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {savedSets.length === 0 ? (
+                        <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '16px 0' }}>
+                          No saved packs yet. Build a quiz and click Save under Your Quiz!
+                        </p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {savedSets.map((s) => (
+                            <motion.div
+                              key={s.id}
+                              className="saved-pack-row"
+                              layout
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.96 }}
+                            >
+                              <div className="saved-pack-meta">
+                                <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <span>{s.name}</span>
+                                  {s.isPublic && (
+                                    <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 999, background: 'var(--amber-tint)', color: '#9A3412', fontWeight: 800 }}>
+                                      🌟 Starter
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{s.questionCount} question{s.questionCount !== 1 ? 's' : ''}</div>
+                              </div>
+                              <div className="saved-pack-actions">
+                                <button type="button" className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.84rem' }} onClick={() => loadSet(s.id)}>
+                                  Load
+                                </button>
+                                <button type="button" className="btn btn-secondary" style={{ padding: '5px 11px', fontSize: '0.84rem' }} onClick={() => exportSavedSet(s.id, s.name)}>
+                                  📤 Export
+                                </button>
+                                {(s.canDelete !== undefined ? s.canDelete : (s.isOwner !== false || (s.isPublic && (!authEnabled || isSignedIn)))) && (
+                                  <button type="button" className="btn btn-danger" style={{ padding: '5px 11px', fontSize: '0.84rem' }} onClick={() => deleteSet(s.id)}>
+                                    {confirmDeleteSetId === s.id ? 'Confirm?' : '🗑️'}
+                                  </button>
                                 )}
                               </div>
-                              <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{s.questionCount} question{s.questionCount !== 1 ? 's' : ''}</div>
-                            </div>
-                            <div className="saved-pack-actions">
-                              <button type="button" className="btn btn-primary" style={{ padding: '5px 12px', fontSize: '0.84rem' }} onClick={() => loadSet(s.id)}>
-                                Load
-                              </button>
-                              <button type="button" className="btn btn-secondary" style={{ padding: '5px 11px', fontSize: '0.84rem' }} onClick={() => exportSavedSet(s.id, s.name)}>
-                                📤 Export
-                              </button>
-                              {s.isOwner !== false && (
-                                <button type="button" className="btn btn-danger" style={{ padding: '5px 11px', fontSize: '0.84rem' }} onClick={() => deleteSet(s.id)}>
-                                  {confirmDeleteSetId === s.id ? 'Confirm?' : '🗑️'}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+                </SmoothHeight>
               </div>
             </div>
 
@@ -2075,17 +2299,21 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
               )}
             </div>
 
-            <button
+            <motion.button
               type="button"
               className="btn btn-success"
               onClick={startGame}
               disabled={questions.length === 0}
+              whileHover={questions.length === 0 ? undefined : { scale: 1.02, y: -2 }}
+              whileTap={questions.length === 0 ? undefined : { scale: 0.97, y: 1 }}
+              animate={questions.length > 0 && (room?.players?.length || 0) > 0 ? { boxShadow: ['0 4px 0 var(--indigo-deep)', '0 4px 0 var(--indigo-deep), 0 0 24px rgba(255, 175, 80, 0.7)', '0 4px 0 var(--indigo-deep)'] } : {}}
+              transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
               style={{ width: '100%', fontSize: '1.3rem', padding: '16px' }}
             >
               {questions.length === 0
                 ? 'Add at least 1 question to Start'
                 : `🚀 Start Game (${questions.length} Question${questions.length !== 1 ? 's' : ''})`}
-            </button>
+            </motion.button>
           </div>
         )}
 

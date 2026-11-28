@@ -109,6 +109,13 @@ async function initStorage() {
       created_at BIGINT NOT NULL
     );
   `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS user_hidden_sets (
+      user_id TEXT NOT NULL,
+      set_id TEXT NOT NULL,
+      PRIMARY KEY (user_id, set_id)
+    );
+  `);
 
   const countRes = await db.query('SELECT COUNT(*)::int AS total FROM question_sets');
   if (countRes.rows[0]?.total === 0) {
@@ -138,10 +145,13 @@ async function listSets({ userId = null, authEnabled = false } = {}) {
       );
     } else if (userId) {
       res = await db.query(
-        `SELECT id, owner_id, is_public, name, created_at, question_count
-         FROM question_sets
-         WHERE owner_id = $1 OR is_public = TRUE
-         ORDER BY is_public ASC, created_at DESC`,
+        `SELECT q.id, q.owner_id, q.is_public, q.name, q.created_at, q.question_count
+         FROM question_sets q
+         WHERE (q.owner_id = $1 OR q.is_public = TRUE)
+           AND NOT EXISTS (
+             SELECT 1 FROM user_hidden_sets h WHERE h.user_id = $1 AND h.set_id = q.id
+           )
+         ORDER BY q.is_public ASC, q.created_at DESC`,
         [userId]
       );
     } else {
@@ -153,31 +163,43 @@ async function listSets({ userId = null, authEnabled = false } = {}) {
       );
     }
 
-    return res.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      createdAt: Number(row.created_at) || Date.now(),
-      questionCount: Number(row.question_count) || 0,
-      isPublic: Boolean(row.is_public),
-      isOwner: !authEnabled || Boolean(userId && row.owner_id === userId)
-    }));
+    return res.rows.map((row) => {
+      const isPublic = Boolean(row.is_public);
+      const isOwner = !authEnabled || Boolean(userId && row.owner_id === userId);
+      return {
+        id: row.id,
+        name: row.name,
+        createdAt: Number(row.created_at) || Date.now(),
+        questionCount: Number(row.question_count) || 0,
+        isPublic,
+        isOwner,
+        canDelete: !authEnabled || Boolean(userId && (isOwner || isPublic))
+      };
+    });
   }
 
   const sets = readJsonSets();
   return sets
     .filter((s) => {
       if (!authEnabled) return true;
-      if (s.isPublic) return true;
+      if (s.isPublic) {
+        return !(userId && Array.isArray(s.hiddenBy) && s.hiddenBy.includes(userId));
+      }
       return Boolean(userId && s.ownerId === userId);
     })
-    .map((s) => ({
-      id: s.id,
-      name: s.name,
-      createdAt: s.createdAt,
-      questionCount: s.questionCount,
-      isPublic: Boolean(s.isPublic),
-      isOwner: !authEnabled || Boolean(userId && s.ownerId === userId)
-    }));
+    .map((s) => {
+      const isPublic = Boolean(s.isPublic);
+      const isOwner = !authEnabled || Boolean(userId && s.ownerId === userId);
+      return {
+        id: s.id,
+        name: s.name,
+        createdAt: s.createdAt,
+        questionCount: s.questionCount,
+        isPublic,
+        isOwner,
+        canDelete: !authEnabled || Boolean(userId && (isOwner || isPublic))
+      };
+    });
 }
 
 /**
@@ -246,7 +268,7 @@ async function saveSet(name, questions, { userId = null } = {}) {
 }
 
 /**
- * Deletes a quiz pack, enforcing ownership when authEnabled is true.
+ * Deletes a user's private quiz pack, or hides a public starter pack for that user.
  */
 async function deleteSet(id, { userId = null, authEnabled = false } = {}) {
   if (isUsingDb()) {
@@ -254,9 +276,18 @@ async function deleteSet(id, { userId = null, authEnabled = false } = {}) {
     const res = await db.query('SELECT id, owner_id, is_public FROM question_sets WHERE id = $1 LIMIT 1', [id]);
     const row = res.rows[0];
     if (!row) return { ok: false, reason: 'not_found' };
-    if (authEnabled && (row.is_public || !userId || row.owner_id !== userId)) {
+    if (authEnabled && row.is_public) {
+      if (!userId) return { ok: false, reason: 'forbidden' };
+      await db.query(
+        'INSERT INTO user_hidden_sets (user_id, set_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [userId, id]
+      );
+      return { ok: true, hiddenForUser: true };
+    }
+    if (authEnabled && (!userId || row.owner_id !== userId)) {
       return { ok: false, reason: 'forbidden' };
     }
+    await db.query('DELETE FROM user_hidden_sets WHERE set_id = $1', [id]);
     await db.query('DELETE FROM question_sets WHERE id = $1', [id]);
     return { ok: true };
   }
@@ -264,7 +295,17 @@ async function deleteSet(id, { userId = null, authEnabled = false } = {}) {
   const sets = readJsonSets();
   const target = sets.find((s) => s.id === id);
   if (!target) return { ok: false, reason: 'not_found' };
-  if (authEnabled && (target.isPublic || !userId || target.ownerId !== userId)) {
+  if (authEnabled && target.isPublic) {
+    if (!userId) return { ok: false, reason: 'forbidden' };
+    const next = sets.map((s) => {
+      if (s.id !== id) return s;
+      const hiddenBy = Array.isArray(s.hiddenBy) ? s.hiddenBy : [];
+      return hiddenBy.includes(userId) ? s : { ...s, hiddenBy: [...hiddenBy, userId] };
+    });
+    writeJsonSets(next);
+    return { ok: true, hiddenForUser: true };
+  }
+  if (authEnabled && (!userId || target.ownerId !== userId)) {
     return { ok: false, reason: 'forbidden' };
   }
   const filtered = sets.filter((s) => s.id !== id);

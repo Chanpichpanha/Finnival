@@ -613,18 +613,32 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
           <motion.div
             className="card"
             style={{ marginBottom: 16 }}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
+            initial={{ opacity: 0, y: -10, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 26 }}
           >
             <p style={{ fontWeight: 700, marginBottom: 12 }}>Choose a target:</p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {rivals.map((p) => (
-                <button key={p.id} className="btn btn-primary" onClick={() => activateOnTarget(p.id)}>
+                <motion.button
+                  key={p.id}
+                  className="btn btn-primary"
+                  onClick={() => activateOnTarget(p.id)}
+                  whileHover={{ scale: 1.05, y: -2 }}
+                  whileTap={{ scale: 0.94 }}
+                >
                   {p.avatar} {p.name}
-                </button>
+                </motion.button>
               ))}
-              <button className="btn btn-danger" onClick={() => setPickingTarget(false)}>Cancel</button>
+              <motion.button
+                className="btn btn-danger"
+                onClick={() => setPickingTarget(false)}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.94 }}
+              >
+                Cancel
+              </motion.button>
             </div>
           </motion.div>
         )}
@@ -638,30 +652,50 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
         />
       </div>
 
-      <div className="question-card" style={{ position: 'relative', overflow: 'hidden' }}>
-        {isPaused && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              backdropFilter: 'blur(14px)',
-              WebkitBackdropFilter: 'blur(14px)',
-              backgroundColor: 'rgba(26, 16, 60, 0.82)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 'var(--radius-lg)',
-              zIndex: 30,
-              padding: 24,
-              textAlign: 'center',
-              border: '2px solid rgba(255, 255, 255, 0.2)'
-            }}
-          >
-            <div style={{ fontSize: '3.5rem', marginBottom: 12 }}>⏸️</div>
-            <h2 style={{ color: 'white', margin: 0, fontSize: '1.9rem', fontWeight: 800 }}>Game Paused by Host</h2>
-          </div>
-        )}
+      <motion.div
+        key={`q-card-${index}`}
+        className="question-card"
+        style={{ position: 'relative', overflow: 'hidden' }}
+        initial={{ opacity: 0, y: 24, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+      >
+        <AnimatePresence>
+          {isPaused && (
+            <motion.div
+              key="pause-overlay"
+              initial={{ opacity: 0, scale: 1.03 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ duration: 0.22 }}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backdropFilter: 'blur(14px)',
+                WebkitBackdropFilter: 'blur(14px)',
+                backgroundColor: 'rgba(26, 16, 60, 0.82)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 'var(--radius-lg)',
+                zIndex: 30,
+                padding: 24,
+                textAlign: 'center',
+                border: '2px solid rgba(255, 255, 255, 0.2)'
+              }}
+            >
+              <motion.div
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                style={{ fontSize: '3.5rem', marginBottom: 12 }}
+              >
+                ⏸️
+              </motion.div>
+              <h2 style={{ color: 'white', margin: 0, fontSize: '1.9rem', fontWeight: 800 }}>Game Paused by Host</h2>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {(question.imageUrl || question.image) && (
           <div style={{ textAlign: 'center', marginBottom: 16 }}>
             <img
@@ -802,24 +836,27 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
               </button>
               )}
               {isReveal && (
-                <div 
-                    style={{ 
-                        marginTop: 16, 
-                        padding: '16px',
-                        background: 'var(--cream)', 
-                        borderRadius: 12,
-                        color: 'var(--dark)', 
-                        fontSize: '1.4rem', 
-                        fontWeight: 'bold',
-                        boxShadow: '0 4px 12px rgba(42,33,66,0.25)',
-                        border: '3px solid var(--dark)',
-                        display: 'inline-block',
-                        minWidth: '250px'
-                    }}
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.78 }}
+                  animate={{ opacity: 1, scale: [0.78, 1.08, 1] }}
+                  transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+                  style={{
+                    marginTop: 16,
+                    padding: '16px',
+                    background: 'var(--cream)',
+                    borderRadius: 12,
+                    color: 'var(--dark)',
+                    fontSize: '1.4rem',
+                    fontWeight: 'bold',
+                    boxShadow: '0 4px 12px rgba(42,33,66,0.25)',
+                    border: '3px solid var(--dark)',
+                    display: 'inline-block',
+                    minWidth: '250px'
+                  }}
                 >
                   <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Correct Answer</div>
                   <div style={{ color: 'var(--green)' }}>{gameState.correctAnswerText || question.correctAnswerText}</div>
-                </div>
+                </motion.div>
               )}
             </div>
           );
@@ -882,22 +919,27 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
               Submit Answer
             </button>
             {gameState?.isReveal && (
-                <div style={{ marginTop: 24, textAlign: 'center' }}>
-                  <div style={{ 
-                    display: 'inline-block',
-                    background: 'linear-gradient(135deg, var(--amber-tint), var(--amber))', 
-                    border: '4px solid var(--indigo-deep)',
-                    borderRadius: 12,
-                    padding: '16px 32px',
-                    boxShadow: '0 4px 0 var(--indigo-deep)'
-                  }}>
-                    <div style={{ color: 'var(--indigo)', fontWeight: 700, fontSize: '0.9rem', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>CORRECT ANSWER</div>
-                    <div style={{ color: 'var(--indigo-deep)', fontSize: '2.5rem', fontWeight: 900, fontFamily: "'Fredoka One', cursive" }}>
-                      {gameState.correctNumber !== undefined ? gameState.correctNumber : question.correctNumber}
-                    </div>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.78 }}
+                animate={{ opacity: 1, scale: [0.78, 1.08, 1] }}
+                transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+                style={{ marginTop: 24, textAlign: 'center' }}
+              >
+                <div style={{
+                  display: 'inline-block',
+                  background: 'linear-gradient(135deg, var(--amber-tint), var(--amber))',
+                  border: '4px solid var(--indigo-deep)',
+                  borderRadius: 12,
+                  padding: '16px 32px',
+                  boxShadow: '0 4px 0 var(--indigo-deep)'
+                }}>
+                  <div style={{ color: 'var(--indigo)', fontWeight: 700, fontSize: '0.9rem', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>CORRECT ANSWER</div>
+                  <div style={{ color: 'var(--indigo-deep)', fontSize: '2.5rem', fontWeight: 900, fontFamily: "'Fredoka One', cursive" }}>
+                    {gameState.correctNumber !== undefined ? gameState.correctNumber : question.correctNumber}
                   </div>
                 </div>
-              )}
+              </motion.div>
+            )}
           </div>
         )}
 
@@ -916,7 +958,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
              submitAnswer={submitAnswer} 
             />
           )}
-      </div>
+      </motion.div>
 
 
       {isScrambled && (

@@ -24,12 +24,12 @@ function clearStoredRoomSession() {
 }
 
 const screenVariants = {
-  initial: { opacity: 0, scale: 0.96, y: 16 },
+  initial: { opacity: 0, scale: 0.95, y: 22 },
   animate: { opacity: 1, scale: 1, y: 0 },
-  exit: { opacity: 0, scale: 0.98, y: -12 }
+  exit: { opacity: 0, scale: 0.97, y: -16 }
 };
 
-const screenTransition = { type: 'spring', stiffness: 260, damping: 26, mass: 0.9 };
+const screenTransition = { type: 'spring', stiffness: 290, damping: 24, mass: 0.85 };
 
 function App() {
   const [screen, setScreen] = useState('home');
@@ -56,11 +56,22 @@ function App() {
   const authStateRef = useRef({ authEnabled, isLoaded, isSignedIn, userId, getToken });
   authStateRef.current = { authEnabled, isLoaded, isSignedIn, userId, getToken };
 
-  const showLocalToast = useCallback((text, tone = 'info') => {
+  const showLocalToast = useCallback((text, tone = 'info', durationMs = 3000) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ text, tone });
-    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+    toastTimerRef.current = setTimeout(() => setToast(null), durationMs);
   }, []);
+
+  const exitRoomWithToast = useCallback((toastText, tone = 'warn', durationMs = 4500) => {
+    clearStoredRoomSession();
+    setRoom(null);
+    setGameState(null);
+    setPin('');
+    setScreen('home');
+    if (toastText) {
+      showLocalToast(toastText, tone, durationMs);
+    }
+  }, [showLocalToast]);
 
   const applyRejoinResult = useCallback((res, savedPin) => {
     if (res?.ok) {
@@ -92,9 +103,15 @@ function App() {
     } else {
       clearStoredRoomSession();
       setPlayerId(socket.id);
+      setRoom(null);
+      setGameState(null);
+      setPin('');
       setScreen('home');
+      if (res?.disconnectedTimeout) {
+        showLocalToast('📡 Disconnected', 'warn', 4500);
+      }
     }
-  }, []);
+  }, [showLocalToast]);
 
   useEffect(() => {
     const onMuteChange = (e) => setLocalMuted(e.detail.muted);
@@ -244,27 +261,19 @@ function App() {
     });
 
     socket.on('hostLeft', () => {
-      clearStoredRoomSession();
-      alert('The host has left. The game is ending.');
-      setRoom(null);
-      setGameState(null);
-      setScreen('home');
+      exitRoomWithToast('⚠️ Host disconnected from the lobby.');
     });
 
     socket.on('roomClosed', (data) => {
-      clearStoredRoomSession();
-      alert(data?.message || 'The host has closed the lobby.');
-      setRoom(null);
-      setGameState(null);
-      setScreen('home');
+      exitRoomWithToast(`🚪 ${data?.message || 'Host closed the lobby.'}`);
     });
 
-    socket.on('kicked', () => {
-      clearStoredRoomSession();
-      alert('You have been removed from the game.');
-      setRoom(null);
-      setGameState(null);
-      setScreen('home');
+    socket.on('kicked', (data) => {
+      exitRoomWithToast(`🚫 ${data?.message || 'You were removed from the lobby.'}`);
+    });
+
+    socket.on('disconnectedFromLobby', (data) => {
+      exitRoomWithToast(`📡 ${data?.message || 'Disconnected'}`);
     });
 
     socket.on('disconnect', (reason) => {
@@ -293,10 +302,54 @@ function App() {
       socket.off('hostLeft');
       socket.off('roomClosed');
       socket.off('kicked');
+      socket.off('disconnectedFromLobby');
       socket.off('disconnect');
       socket.off('connect_error');
     };
-  }, [applyRejoinResult, showLocalToast]);
+  }, [applyRejoinResult, exitRoomWithToast, showLocalToast]);
+
+  useEffect(() => {
+    const notifyPresence = (away) => {
+      if (screenRef.current === 'home') return;
+      const isPlayer = sessionStorage.getItem('finnival-role') === 'player' && roomRef.current?.host?.id !== playerIdRef.current;
+      if (!isPlayer) return;
+      if (!away && !socket.connected) {
+        socket.connect();
+        return;
+      }
+      if (socket.connected) {
+        socket.emit('playerPresence', { away }, (res) => {
+          if (!away && res && res.ok === false && res.disconnectedTimeout) {
+            exitRoomWithToast(`📡 ${res.message || 'Disconnected'}`);
+          }
+        });
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        notifyPresence(true);
+      } else if (document.visibilityState === 'visible' && navigator.onLine !== false) {
+        notifyPresence(false);
+      }
+    };
+
+    const handleOffline = () => notifyPresence(true);
+    const handleOnline = () => {
+      if (document.visibilityState === 'visible') {
+        notifyPresence(false);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [exitRoomWithToast]);
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -340,8 +393,16 @@ function App() {
 
   return (
     <div className="App">
+      <div className="ambient-bg" aria-hidden="true">
+        <div className="ambient-orb ambient-orb-1" />
+        <div className="ambient-orb ambient-orb-2" />
+        <div className="ambient-orb ambient-orb-3" />
+      </div>
       {authEnabled && (screen === 'home' || screen === 'lobby') && (
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: -18, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 360, damping: 26 }}
           style={{
             position: 'fixed',
             top: 14,
@@ -411,12 +472,17 @@ function App() {
               </button>
             </>
           )}
-        </div>
+        </motion.div>
       )}
-      <button
+      <motion.button
         type="button"
         onClick={() => setLocalMuted(toggleMute())}
         className="btn btn-secondary"
+        initial={{ opacity: 0, y: -18, scale: 0.94 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 360, damping: 26, delay: 0.04 }}
+        whileHover={{ scale: 1.06 }}
+        whileTap={{ scale: 0.94 }}
         style={{
           position: 'fixed',
           top: 14,
@@ -437,7 +503,7 @@ function App() {
         title={muted ? 'Unmute Sound' : 'Mute Sound'}
       >
         <span>{muted ? '🔇 Muted' : '🔊 Sound'}</span>
-      </button>
+      </motion.button>
       <AnimatePresence>
         {connectionLost && (
           <motion.div
@@ -457,6 +523,7 @@ function App() {
       <AnimatePresence mode="wait">
         <motion.div
           key={screen}
+          className="screen-stage"
           initial="initial"
           animate="animate"
           exit="exit"
@@ -476,6 +543,7 @@ function HomeScreen({ socket, setScreen, setPin, setPlayerId, setRoom }) {
   const [gameName, setGameName] = useState('');
   const [joinPin, setJoinPin] = useState('');
   const [hostError, setHostError] = useState(null);
+  const [joinError, setJoinError] = useState(null);
   const [creatingRoom, setCreatingRoom] = useState(false);
   const avatars = ['🦊', '🐼', '🦁', '🐯', '🐨', '🐸', '🦄', '🐙'];
   const [avatar, setAvatar] = useState(avatars[0]);
@@ -532,6 +600,7 @@ function HomeScreen({ socket, setScreen, setPin, setPlayerId, setRoom }) {
 
   const handleJoin = () => {
     if (!name.trim() || !joinPin.trim()) return;
+    setJoinError(null);
     socket.emit('joinRoom', { pin: joinPin, playerName: name, avatar }, (res) => {
       if (res.ok) {
         sessionStorage.setItem('finnival-pin', res.pin);
@@ -543,153 +612,252 @@ function HomeScreen({ socket, setScreen, setPin, setPlayerId, setRoom }) {
         if (typeof setRoom === 'function' && res.snapshot) setRoom(res.snapshot);
         setScreen('lobby');
       } else {
-        alert(res.message);
+        setJoinError(res?.message || 'Could not join that lobby.');
       }
     });
   };
-
-  if (!mode) {
-    return (
-      <div className="screen-center">
-        <div className="card" style={{ textAlign: 'center', maxWidth: 500 }}>
-          <h1
-            style={{
-              fontSize: '3.4rem',
-              marginBottom: 8,
-              letterSpacing: 2,
-              color: 'var(--amber)',
-              textShadow: '-2px -2px 0 var(--indigo-deep), 2px -2px 0 var(--indigo-deep), -2px 2px 0 var(--indigo-deep), 2px 2px 0 var(--indigo-deep), 0 -2px 0 var(--indigo-deep), 0 2px 0 var(--indigo-deep), -2px 0 0 var(--indigo-deep), 2px 0 0 var(--indigo-deep), 0 4px 0 var(--indigo-deep)'
-            }}
-          >
-            FINNIVAL
-          </h1>
-          <p style={{ fontSize: '1.2rem', marginBottom: 32, color: 'var(--plum)', fontWeight: 700, textShadow: '-1px -1px 0 var(--indigo-deep), 1px -1px 0 var(--indigo-deep), -1px 1px 0 var(--indigo-deep), 1px 1px 0 var(--indigo-deep), 0 -1px 0 var(--indigo-deep), 0 1px 0 var(--indigo-deep), -1px 0 0 var(--indigo-deep), 1px 0 0 var(--indigo-deep)' }}>The ultimate quiz battle with powers!</p>
-          <button className="btn btn-primary" onClick={() => setMode('host')} style={{ width: '100%', marginBottom: 16, fontSize: '1.2rem' }}>
-            🎮 Host a Game
-          </button>
-          <button className="btn btn-secondary" onClick={() => setMode('join')} style={{ width: '100%', fontSize: '1.2rem' }}>
-            👥 Join a Game
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   const userLikelySignedIn = isSignedIn || (!isLoaded && hasAuthCookie);
   const needsHostLogin = mode === 'host' && authEnabled && !userLikelySignedIn;
 
   return (
     <div className="screen-center">
-      <div className="card" style={{ textAlign: 'center', maxWidth: 400 }}>
-        <h2 style={{ marginBottom: 24 }}>{mode === 'host' ? '🎮 Host a Game' : '👥 Join a Game'}</h2>
+      <AnimatePresence mode="wait">
+        {!mode ? (
+          <motion.div
+            key="home-menu"
+            className="card"
+            style={{ textAlign: 'center', maxWidth: 500, width: '100%' }}
+            initial={{ opacity: 0, scale: 0.9, y: 26 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, x: -36 }}
+            transition={{ type: 'spring', stiffness: 330, damping: 24 }}
+          >
+            <motion.div
+              initial={{ scale: 0.65, opacity: 0, y: -12 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 18, delay: 0.05 }}
+            >
+              <motion.h1
+                animate={{ y: [0, -5, 0] }}
+                transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+                style={{
+                  fontSize: '3.4rem',
+                  marginBottom: 8,
+                  letterSpacing: 2,
+                  color: 'var(--amber)',
+                  textShadow: '-2px -2px 0 var(--indigo-deep), 2px -2px 0 var(--indigo-deep), -2px 2px 0 var(--indigo-deep), 2px 2px 0 var(--indigo-deep), 0 -2px 0 var(--indigo-deep), 0 2px 0 var(--indigo-deep), -2px 0 0 var(--indigo-deep), 2px 0 0 var(--indigo-deep), 0 4px 0 var(--indigo-deep)'
+                }}
+              >
+                FINNIVAL
+              </motion.h1>
+            </motion.div>
+            <motion.p
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.14, duration: 0.28 }}
+              style={{ fontSize: '1.2rem', marginBottom: 32, color: 'var(--plum)', fontWeight: 700, textShadow: '-1px -1px 0 var(--indigo-deep), 1px -1px 0 var(--indigo-deep), -1px 1px 0 var(--indigo-deep), 1px 1px 0 var(--indigo-deep), 0 -1px 0 var(--indigo-deep), 0 1px 0 var(--indigo-deep), -1px 0 0 var(--indigo-deep), 1px 0 0 var(--indigo-deep)' }}
+            >
+              The ultimate quiz battle with powers!
+            </motion.p>
+            <motion.button
+              className="btn btn-primary"
+              onClick={() => setMode('host')}
+              style={{ width: '100%', marginBottom: 16, fontSize: '1.2rem' }}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, type: 'spring', stiffness: 360, damping: 22 }}
+              whileHover={{ scale: 1.03, y: -3 }}
+              whileTap={{ scale: 0.96, y: 2 }}
+            >
+              🎮 Host a Game
+            </motion.button>
+            <motion.button
+              className="btn btn-secondary"
+              onClick={() => { setJoinError(null); setMode('join'); }}
+              style={{ width: '100%', fontSize: '1.2rem' }}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.27, type: 'spring', stiffness: 360, damping: 22 }}
+              whileHover={{ scale: 1.03, y: -3 }}
+              whileTap={{ scale: 0.96, y: 2 }}
+            >
+              👥 Join a Game
+            </motion.button>
+          </motion.div>
+        ) : (
+          <motion.div
+            key={`home-${mode}`}
+            className="card"
+            style={{ textAlign: 'center', maxWidth: 420, width: '100%' }}
+            initial={{ opacity: 0, scale: 0.9, x: 44 }}
+            animate={{ opacity: 1, scale: 1, x: 0 }}
+            exit={{ opacity: 0, scale: 0.9, x: 44 }}
+            transition={{ type: 'spring', stiffness: 340, damping: 25 }}
+          >
+            <motion.h2
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.06, duration: 0.22 }}
+              style={{ marginBottom: 24 }}
+            >
+              {mode === 'host' ? '🎮 Host a Game' : '👥 Join a Game'}
+            </motion.h2>
 
-        {mode === 'host' ? (
-          needsHostLogin ? (
-            <div style={{ marginBottom: 24 }}>
-              <p style={{ color: 'var(--muted)', fontWeight: 600, marginBottom: 18, lineHeight: 1.5 }}>
-                Sign in or create a free account to host games and save quizzes to your library.
-              </p>
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-                <button type="button" className="btn btn-primary" onClick={openSignIn} style={{ flex: 1 }}>
-                  Sign In
-                </button>
-                <button type="button" className="btn btn-success" onClick={openSignUp} style={{ flex: 1 }}>
-                  Sign Up
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>Game name:</label>
-              <input
-                className="input"
-                type="text"
-                placeholder="Enter a name for your game"
-                value={gameName}
-                onChange={(e) => setGameName(e.target.value)}
-                maxLength={40}
-                style={{ width: '100%' }}
-              />
-              {hostError && (
-                <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(232,69,69,0.12)', color: 'var(--coral)', fontWeight: 700, fontSize: '0.85rem' }}>
-                  {hostError}
+            {mode === 'host' ? (
+              needsHostLogin ? (
+                <div style={{ marginBottom: 24 }}>
+                  <p style={{ color: 'var(--muted)', fontWeight: 600, marginBottom: 18, lineHeight: 1.5 }}>
+                    Sign in or create a free account to host games and save quizzes to your library.
+                  </p>
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                    <motion.button type="button" className="btn btn-primary" onClick={openSignIn} style={{ flex: 1 }} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}>
+                      Sign In
+                    </motion.button>
+                    <motion.button type="button" className="btn btn-success" onClick={openSignUp} style={{ flex: 1 }} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}>
+                      Sign Up
+                    </motion.button>
+                  </div>
                 </div>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1, type: 'spring', stiffness: 320, damping: 24 }}
+                  style={{ marginBottom: 24 }}
+                >
+                  <label style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>Game name:</label>
+                  <input
+                    className="input"
+                    type="text"
+                    placeholder="Enter a name for your game"
+                    value={gameName}
+                    onChange={(e) => setGameName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && gameName.trim() && !creatingRoom) handleCreate(); }}
+                    maxLength={40}
+                    autoFocus
+                    style={{ width: '100%' }}
+                  />
+                  <AnimatePresence>
+                    {hostError && (
+                      <motion.div
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: [0, -6, 6, -4, 4, 0] }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.35 }}
+                        style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(232,69,69,0.12)', color: 'var(--coral)', fontWeight: 700, fontSize: '0.85rem' }}
+                      >
+                        {hostError}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              )
+            ) : (
+              <>
+                <div style={{ marginBottom: 24 }}>
+                  <label style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>Choose your avatar:</label>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    {avatars.map((a, idx) => (
+                      <motion.button
+                        key={a}
+                        type="button"
+                        onClick={() => setAvatar(a)}
+                        initial={{ opacity: 0, scale: 0.6 }}
+                        animate={{
+                          opacity: 1,
+                          scale: avatar === a ? 1.12 : 1,
+                          rotate: avatar === a ? [0, -8, 6, 0] : 0
+                        }}
+                        transition={{ delay: idx * 0.025, type: 'spring', stiffness: 400, damping: 20 }}
+                        whileHover={{ scale: 1.16, y: -3 }}
+                        whileTap={{ scale: 0.9 }}
+                        style={{
+                          fontSize: '2rem',
+                          padding: '8px 12px',
+                          border: avatar === a ? '3px solid var(--orange)' : '3px solid var(--plum-tint)',
+                          borderRadius: 'var(--radius-sm)',
+                          background: avatar === a ? 'var(--amber-tint)' : 'white',
+                          boxShadow: avatar === a ? '0 4px 0 var(--orange-dark)' : 'none',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {a}
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 24 }}>
+                  <label style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>Your name:</label>
+                  <input
+                    className="input"
+                    type="text"
+                    placeholder="Enter your name"
+                    value={name}
+                    onChange={(e) => { setJoinError(null); setName(e.target.value); }}
+                    maxLength={16}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </>
+            )}
+
+            {mode === 'join' && (
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>Game PIN:</label>
+                <input
+                  className="input"
+                  type="text"
+                  placeholder="6-digit code"
+                  value={joinPin}
+                  onChange={(e) => { setJoinError(null); setJoinPin(e.target.value); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && name.trim() && joinPin.trim()) handleJoin(); }}
+                  maxLength={6}
+                  style={{ width: '100%', textAlign: 'center', fontSize: '1.5rem', letterSpacing: 8, fontFamily: "'Fredoka One', cursive", color: 'var(--indigo)', background: 'var(--amber-tint)' }}
+                />
+                <AnimatePresence>
+                  {joinError && (
+                    <motion.div
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: [0, -6, 6, -4, 4, 0] }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.35 }}
+                      style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(232,69,69,0.12)', color: 'var(--coral)', fontWeight: 700, fontSize: '0.85rem' }}
+                    >
+                      {joinError}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <motion.button
+                className="btn btn-secondary"
+                onClick={() => { setHostError(null); setJoinError(null); setMode(null); }}
+                style={{ flex: 1 }}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.96 }}
+              >
+                Back
+              </motion.button>
+              {!needsHostLogin && (
+                <motion.button
+                  className={mode === 'host' ? 'btn btn-primary' : 'btn btn-success'}
+                  onClick={mode === 'host' ? handleCreate : handleJoin}
+                  style={{ flex: 1 }}
+                  disabled={mode === 'host' ? (!gameName.trim() || creatingRoom) : !name.trim()}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                >
+                  {mode === 'host' ? (creatingRoom ? 'Creating...' : 'Create Room') : 'Join'}
+                </motion.button>
               )}
             </div>
-          )
-        ) : (
-          <>
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>Choose your avatar:</label>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                {avatars.map((a) => (
-                  <button
-                    key={a}
-                    onClick={() => setAvatar(a)}
-                    style={{
-                      fontSize: '2rem',
-                      padding: '8px 12px',
-                      border: avatar === a ? '3px solid var(--orange)' : '3px solid var(--plum-tint)',
-                      borderRadius: 'var(--radius-sm)',
-                      background: avatar === a ? 'var(--amber-tint)' : 'white',
-                      boxShadow: avatar === a ? '0 4px 0 var(--orange-dark)' : 'none',
-                      transform: avatar === a ? 'translateY(-2px)' : 'none',
-                      transition: 'all 0.15s',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {a}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>Your name:</label>
-              <input
-                className="input"
-                type="text"
-                placeholder="Enter your name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={16}
-                style={{ width: '100%' }}
-              />
-            </div>
-          </>
+          </motion.div>
         )}
-
-        {mode === 'join' && (
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>Game PIN:</label>
-            <input
-              className="input"
-              type="text"
-              placeholder="6-digit code"
-              value={joinPin}
-              onChange={(e) => setJoinPin(e.target.value)}
-              maxLength={6}
-              style={{ width: '100%', textAlign: 'center', fontSize: '1.5rem', letterSpacing: 8, fontFamily: "'Fredoka One', cursive", color: 'var(--indigo)', background: 'var(--amber-tint)' }}
-            />
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 12 }}>
-          <button className="btn btn-secondary" onClick={() => { setHostError(null); setMode(null); }} style={{ flex: 1 }}>
-            Back
-          </button>
-          {!needsHostLogin && (
-            <button
-              className={mode === 'host' ? 'btn btn-primary' : 'btn btn-success'}
-              onClick={mode === 'host' ? handleCreate : handleJoin}
-              style={{ flex: 1 }}
-              disabled={mode === 'host' ? (!gameName.trim() || creatingRoom) : !name.trim()}
-            >
-              {mode === 'host' ? (creatingRoom ? 'Creating...' : 'Create Room') : 'Join'}
-            </button>
-          )}
-        </div>
-      </div>
+      </AnimatePresence>
     </div>
   );
 }

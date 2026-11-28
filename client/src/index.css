@@ -78,8 +78,7 @@ h1, h2, h3 {
   letter-spacing: 0.4px;
   cursor: pointer;
   box-shadow: 0 4px 0 var(--indigo-deep);
-  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out, filter 0.15s ease;
-  
+  transition: transform 0.16s var(--ease-bounce), box-shadow 0.16s var(--ease-bounce), filter 0.15s ease;
 }
 
 .btn:hover {
