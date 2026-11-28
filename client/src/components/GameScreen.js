@@ -132,6 +132,217 @@ function AnimatedScore({ value }) {
   return <span className="score-pop">{display}</span>;
 }
 
+function buildFallbackResult(question, gameState, submittedVal) {
+  const qType = question?.type || 'classic';
+  if (qType === 'classic') {
+    const ok = typeof submittedVal === 'number' && submittedVal === gameState?.correctAnswer;
+    return { correct: ok, accuracy: ok ? 1 : 0, matchType: null, points: null };
+  }
+  if (qType === 'short_answer') {
+    const res = evaluateShortAnswer(
+      submittedVal,
+      gameState?.correctAnswerText || question?.correctAnswerText,
+      gameState?.acceptedAnswers || question?.acceptedAnswers
+    );
+    return { correct: res.isCorrect, accuracy: res.accuracy, matchType: res.matchType, points: null };
+  }
+  if (qType === 'slider') {
+    const target = Number(gameState?.correctNumber ?? question?.correctNumber ?? 0);
+    const range = (Number(question?.max) - Number(question?.min)) || 100;
+    const diff = Math.abs((Number(submittedVal) || 0) - target);
+    if (diff === 0) return { correct: true, accuracy: 1, matchType: null, points: null };
+    if (diff <= range * 0.15) return { correct: true, accuracy: 1 - (diff / (range * 0.15)), matchType: null, points: null };
+    return { correct: false, accuracy: 0, matchType: null, points: null };
+  }
+  if (qType === 'match') {
+    const pairs = Array.isArray(submittedVal) ? submittedVal : [];
+    const total = question?.pairs?.length || 0;
+    if (total === 0) return { correct: false, accuracy: 0, matchType: null, points: null };
+    const matched = pairs.reduce((acc, a) => acc + (Number(a.left) === Number(a.right) ? 1 : 0), 0);
+    return { correct: matched > 0, accuracy: matched / total, matchType: null, points: null };
+  }
+  return { correct: false, accuracy: 0, matchType: null, points: null };
+}
+
+function getResultLabel(qType, res) {
+  if (!res.correct) {
+    if (qType === 'slider') return '✕ Out of Range';
+    if (qType === 'match') return '✕ No Correct Pairs';
+    if (qType === 'short_answer') return '✕ Not Quite';
+    return '✕ Incorrect';
+  }
+  if (res.accuracy < 0.99) {
+    if (qType === 'slider') return '🎯 Close Guess!';
+    if (qType === 'match') return '✨ Partial Match';
+    return '✨ Close! Partial Credit';
+  }
+  if (qType === 'slider') return '🎯 Bullseye! Exact Target';
+  if (qType === 'match') return '✓ All Pairs Matched!';
+  if (qType === 'short_answer') {
+    return res.matchType === 'typo' ? '✓ Close Spelling — Accepted!' : '✓ Exact Match!';
+  }
+  return '✓ Correct!';
+}
+
+/**
+ * Displays server-verified accuracy, status, and points earned at the bottom of the question card on reveal.
+ */
+function RevealResultBanner({ gameState, question, playerId, answerAck, answered, lastSubmittedValue }) {
+  const qType = question?.type || 'classic';
+  const revealResult = gameState?.playerResults?.[playerId] || null;
+  const ackMatches =
+    answerAck && (answerAck.questionIndex === undefined || answerAck.questionIndex === gameState?.index)
+      ? answerAck
+      : null;
+
+  const serverResult = revealResult || (ackMatches
+    ? {
+        correct: Boolean(ackMatches.correct),
+        accuracy: typeof ackMatches.accuracy === 'number' ? ackMatches.accuracy : (ackMatches.correct ? 1 : 0),
+        matchType: ackMatches.matchType || null,
+        points: typeof ackMatches.points === 'number' ? ackMatches.points : null,
+        streak: ackMatches.streak || 0
+      }
+    : null);
+
+  const didSubmit = Boolean(serverResult || answered || gameState?.hasSubmitted);
+
+  if (!didSubmit) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 10, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 360, damping: 24 }}
+        style={{
+          marginTop: 20,
+          padding: '12px 16px',
+          borderRadius: 12,
+          background: 'rgba(66, 52, 101, 0.1)',
+          border: '2px solid rgba(66, 52, 101, 0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 10,
+          color: 'var(--indigo)'
+        }}
+      >
+        <div style={{ fontWeight: 800, fontSize: '0.98rem' }}>
+          {gameState?.skipped ? '⏭️ Question Skipped' : "⏱️ Time's Up — No Answer"}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: '0.82rem', fontWeight: 800, opacity: 0.8 }}>0% accuracy</span>
+          <span style={{
+            padding: '4px 12px',
+            borderRadius: 999,
+            background: 'rgba(66, 52, 101, 0.16)',
+            color: 'var(--indigo-deep)',
+            fontWeight: 900,
+            fontSize: '0.92rem'
+          }}>
+            +0 pts
+          </span>
+        </div>
+      </motion.div>
+    );
+  }
+
+  const res = serverResult || buildFallbackResult(question, gameState, lastSubmittedValue);
+  const pct = Math.round(Math.max(0, Math.min(1, Number(res.accuracy) || 0)) * 100);
+  const isFull = res.correct && res.accuracy >= 0.99;
+  const isPartial = res.correct && res.accuracy < 0.99;
+
+  const theme = isFull
+    ? {
+        bg: 'rgba(61, 190, 139, 0.16)',
+        border: '#2E9E70',
+        text: '#14532D',
+        pillBg: '#2E9E70',
+        pillText: '#FFFFFF'
+      }
+    : isPartial
+      ? {
+          bg: 'rgba(245, 158, 11, 0.18)',
+          border: '#D97706',
+          text: '#78350F',
+          pillBg: '#F59E0B',
+          pillText: '#1E1B4B'
+        }
+      : {
+          bg: 'rgba(229, 72, 77, 0.12)',
+          border: '#E5484D',
+          text: '#7F1D1D',
+          pillBg: '#E5484D',
+          pillText: '#FFFFFF'
+        };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 360, damping: 24 }}
+      style={{
+        marginTop: 20,
+        padding: '12px 16px',
+        borderRadius: 12,
+        background: theme.bg,
+        border: `2.5px solid ${theme.border}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 10,
+        color: theme.text
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 900, fontSize: '1rem' }}>
+          {getResultLabel(qType, res)}
+        </span>
+        <span style={{
+          fontSize: '0.8rem',
+          fontWeight: 800,
+          padding: '2px 9px',
+          borderRadius: 999,
+          background: 'rgba(255, 255, 255, 0.72)',
+          color: theme.text
+        }}>
+          {pct}% accuracy
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {res.correct && res.streak >= 2 && (
+          <span style={{
+            fontSize: '0.82rem',
+            fontWeight: 800,
+            padding: '4px 10px',
+            borderRadius: 999,
+            background: 'var(--amber-tint)',
+            border: '1.5px solid var(--orange)',
+            color: '#9A3412'
+          }}>
+            🔥 {res.streak} streak
+          </span>
+        )}
+        {typeof res.points === 'number' && (
+          <span style={{
+            padding: '5px 14px',
+            borderRadius: 999,
+            background: theme.pillBg,
+            color: theme.pillText,
+            fontWeight: 900,
+            fontSize: '0.96rem',
+            fontFamily: "'Fredoka One', cursive",
+            letterSpacing: '0.3px'
+          }}>
+            +{res.points} pts
+          </span>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 /**
  * Renders a question image only after it loads cleanly, preventing empty border-dot placeholders.
  */
@@ -209,6 +420,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   const [shortAnswerText, setShortAnswerText] = useState('');
   const [answerAck, setAnswerAck] = useState(null);
   const [sliderValue, setSliderValue] = useState(50);
+  const lastSubmittedValueRef = useRef(null);
   const [maskedHint, setMaskedHint] = useState(null);
   const [sliderSafeRange, setSliderSafeRange] = useState(null);
   const [oracleMatchPair, setOracleMatchPair] = useState(null);
@@ -266,6 +478,14 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
     setSelectedOption(null);
     setShortAnswerText('');
     setAnswerAck(null);
+    lastSubmittedValueRef.current = null;
+    const minVal = Number(gameState?.question?.min);
+    const maxVal = Number(gameState?.question?.max);
+    if (Number.isFinite(minVal) && Number.isFinite(maxVal)) {
+      setSliderValue(Math.round((minVal + maxVal) / 2));
+    } else {
+      setSliderValue(50);
+    }
     setFrozenUntil(me?.frozen ? Date.now() + 5000 : 0);
     setBlindedUntil(0);
     setScrambledUntil(0);
@@ -386,7 +606,9 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
     playSubmit();
     setAnswered(true);
     setSelectedOption(index);
-    const finalAnswer = (isScrambled && typeof index === 'number') ? scrambleMap[index] : index;
+    const isClassic = !question?.type || question.type === 'classic';
+    const finalAnswer = (isScrambled && isClassic && typeof index === 'number') ? scrambleMap[index] : index;
+    lastSubmittedValueRef.current = finalAnswer;
     socket.emit('submitAnswer', { answerIndex: finalAnswer, clientTime: gameState?.startedAt });
   };
 
@@ -814,33 +1036,25 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
             let shortVerdict = null;
 
             if (isReveal) {
+                const revealResult = gameState?.playerResults?.[playerId];
                 const ackMatchesRound = answerAck && (answerAck.questionIndex === undefined || answerAck.questionIndex === gameState?.index);
-                shortVerdict = (ackMatchesRound && answerAck.matchType)
+                shortVerdict = revealResult || ((ackMatchesRound && answerAck.matchType)
                   ? {
                       isCorrect: Boolean(answerAck.correct),
                       accuracy: typeof answerAck.accuracy === 'number' ? answerAck.accuracy : (answerAck.correct ? 1 : 0),
                       matchType: answerAck.matchType,
                       points: answerAck.points
                     }
-                  : evaluateShortAnswer(shortAnswerText, primaryTarget, aliases);
+                  : evaluateShortAnswer(shortAnswerText, primaryTarget, aliases));
 
-                if (shortVerdict.isCorrect) {
-                  inputBg = shortVerdict.accuracy < 0.9 ? '#F59E0B' : 'var(--green)';
+                const isRight = Boolean(shortVerdict.correct ?? shortVerdict.isCorrect);
+                if (isRight) {
+                  inputBg = shortVerdict.accuracy < 0.99 ? '#F59E0B' : 'var(--green)';
                 } else {
                   inputBg = 'var(--red)';
                 }
                 inputColor = 'white';
             }
-
-            const verdictBadge = !isReveal || !shortVerdict ? null : (
-              shortVerdict.isCorrect
-                ? (shortVerdict.matchType === 'partial'
-                    ? `✨ Close! Partial Credit (${Math.round(shortVerdict.accuracy * 100)}%)${shortVerdict.points ? ` · +${shortVerdict.points} pts` : ''}`
-                    : shortVerdict.matchType === 'typo'
-                      ? `✓ Close Spelling — Accepted!${shortVerdict.points ? ` · +${shortVerdict.points} pts` : ''}`
-                      : `✓ Exact Match!${shortVerdict.points ? ` · +${shortVerdict.points} pts` : ''}`)
-                : '✕ Not Quite'
-            );
 
             return (
             <div style={{ padding: 24, textAlign: 'center', background: 'rgba(42,33,66,0.45)', borderRadius: 12 }}>
@@ -891,7 +1105,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                     width: '100%', 
                     maxWidth: 400, 
                     fontSize: '1.5rem', 
-                    marginBottom: verdictBadge ? 10 : 24, 
+                    marginBottom: 24, 
                     textAlign: 'center',
                     backgroundColor: inputBg,
                     color: inputColor,
@@ -901,16 +1115,6 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                     fontWeight: 'bold', fontFamily: "'Fredoka One', cursive"
                 }}
               />
-              {verdictBadge && (
-                <div style={{
-                  color: shortVerdict.isCorrect ? (shortVerdict.accuracy < 0.9 ? '#FDE68A' : '#86EFAC') : '#FCA5A5',
-                  fontWeight: 800,
-                  fontSize: '0.95rem',
-                  marginBottom: 14
-                }}>
-                  {verdictBadge}
-                </div>
-              )}
               <br/>
               {!isReveal && (
               <button 
@@ -1050,6 +1254,17 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
              submitAnswer={submitAnswer} 
             />
           )}
+
+        {gameState?.isReveal && (
+          <RevealResultBanner
+            gameState={gameState}
+            question={question}
+            playerId={playerId}
+            answerAck={answerAck}
+            answered={answered}
+            lastSubmittedValue={lastSubmittedValueRef.current}
+          />
+        )}
       </motion.div>
 
 
@@ -1111,7 +1326,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
           </div>
         </motion.div>
       )}
-      {answered && !isFrozen && (
+      {answered && !isFrozen && !gameState?.isReveal && (
         <motion.div
           style={{ textAlign: 'center', color: 'white', fontSize: '1.2rem', marginTop: 24 }}
           initial={{ opacity: 0 }}

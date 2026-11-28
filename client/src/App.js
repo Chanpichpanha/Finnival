@@ -97,7 +97,11 @@ function App() {
           pausedAt: res.pausedAt || null,
           isReveal: res.snapshot.state === 'reveal',
           hasSubmitted: res.hasSubmitted,
-          correctAnswer: res.snapshot.state === 'reveal' ? res.snapshot.questions[qIndex]?.correctAnswer : undefined
+          correctAnswer: res.snapshot.state === 'reveal' ? (res.correctAnswer ?? res.snapshot.questions[qIndex]?.correctAnswer) : undefined,
+          correctAnswerText: res.snapshot.state === 'reveal' ? (res.correctAnswerText ?? res.snapshot.questions[qIndex]?.correctAnswerText) : undefined,
+          acceptedAnswers: res.snapshot.state === 'reveal' ? (res.acceptedAnswers ?? res.snapshot.questions[qIndex]?.acceptedAnswers) : undefined,
+          correctNumber: res.snapshot.state === 'reveal' ? (res.correctNumber ?? res.snapshot.questions[qIndex]?.correctNumber) : undefined,
+          playerResults: res.snapshot.state === 'reveal' ? res.playerResults : undefined
         });
       }
     } else {

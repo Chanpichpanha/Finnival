@@ -674,11 +674,22 @@ io.on('connection', (socket) => {
     const snapshot = roomSnapshot(room);
     let activeQuestion = null;
     let hasSubmitted = false;
+    let rejoinExtras = {};
 
     if (room.state === 'question' || room.state === 'reveal') {
       const q = room.questions[room.questionIndex];
       if (q) {
         activeQuestion = isHost ? q : sanitizeQuestion(q);
+        if (room.state === 'reveal') {
+          rejoinExtras = {
+            correctAnswer: q.correctAnswer,
+            correctAnswerText: q.correctAnswerText,
+            acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers : [],
+            correctNumber: q.correctNumber,
+            pairs: q.pairs,
+            playerResults: buildPlayerResults(room)
+          };
+        }
       }
       hasSubmitted = !isHost && room.answers ? room.answers.has(socket.id) : false;
     }
@@ -694,7 +705,8 @@ io.on('connection', (socket) => {
       endsAt: room.endsAt,
       paused: !!room.paused,
       pausedAt: room.paused ? room.pausedAt : null,
-      powerSelectEndsAt: room.powerSelectStartedAt ? room.powerSelectStartedAt + POWER_SELECT_DURATION_MS : null
+      powerSelectEndsAt: room.powerSelectStartedAt ? room.powerSelectStartedAt + POWER_SELECT_DURATION_MS : null,
+      ...rejoinExtras
     };
 
     if (cb) cb(rejoinPayload);
@@ -1101,6 +1113,22 @@ io.on('connection', (socket) => {
     room.timer = setTimeout(() => revealAnswer(room), q.timeLimit * 1000 + 250);
   }
 
+  function buildPlayerResults(room) {
+    const playerResults = {};
+    if (!room?.answers) return playerResults;
+    room.answers.forEach((ans, sockId) => {
+      const p = room.players.find((pl) => pl.id === sockId);
+      playerResults[sockId] = {
+        correct: Boolean(ans.correct),
+        accuracy: typeof ans.accuracy === 'number' ? ans.accuracy : (ans.correct ? 1 : 0),
+        matchType: ans.matchType || null,
+        points: Number(ans.points) || 0,
+        streak: p ? p.streak : 0
+      };
+    });
+    return playerResults;
+  }
+
   function revealAnswer(room, isSkipped = false) {
     if (room.state !== 'question') return;
     clearRoomTimers(room);
@@ -1127,6 +1155,7 @@ io.on('connection', (socket) => {
       correctNumber: q.correctNumber,
       pairs: q.pairs,
       distribution,
+      playerResults: buildPlayerResults(room),
       leaderboard: scorer.map((p, i) => ({ rank: i + 1, ...publicPlayer(p) })),
       lastRound: room.lastRound || null,
       skipped: isSkipped
@@ -1242,7 +1271,13 @@ io.on('connection', (socket) => {
     }
     player.score += earnedPoints;
 
-    room.answers.set(socket.id, { answerIndex, correct: isCorrect, points: earnedPoints });
+    room.answers.set(socket.id, {
+      answerIndex,
+      correct: isCorrect,
+      accuracy,
+      matchType,
+      points: earnedPoints
+    });
     room.lastRound = { name: player.name, correct: isCorrect, points: earnedPoints };
 
     socket.emit('answerAck', {
@@ -1250,7 +1285,7 @@ io.on('connection', (socket) => {
       correct: isCorrect,
       accuracy,
       matchType,
-      points,
+      points: earnedPoints,
       total: player.score,
       streak: player.streak
     });
