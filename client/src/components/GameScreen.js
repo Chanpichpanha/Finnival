@@ -131,6 +131,55 @@ function AnimatedScore({ value }) {
   return <span className="score-pop">{display}</span>;
 }
 
+/**
+ * Renders a question image only after it loads cleanly, preventing empty border-dot placeholders.
+ */
+function QuestionImage({
+  rawUrl,
+  maxHeight = 180,
+  marginTop = 0,
+  marginBottom = 16,
+  borderRadius = 12,
+  boxShadow = '0 4px 0 var(--indigo-deep)'
+}) {
+  const src = resolveImageUrl(rawUrl);
+  const [status, setStatus] = useState('loading');
+  const imgRef = useRef(null);
+
+  useEffect(() => {
+    setStatus('loading');
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) {
+      setStatus('loaded');
+    }
+  }, [src]);
+
+  if (!src || status === 'error') return null;
+
+  return (
+    <div style={{ textAlign: 'center', marginTop, marginBottom, display: status === 'loaded' ? 'block' : 'none' }}>
+      <img
+        key={src}
+        ref={imgRef}
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        onLoad={() => setStatus('loaded')}
+        onError={() => setStatus('error')}
+        style={{
+          maxHeight: `${maxHeight}px`,
+          maxWidth: '100%',
+          width: 'auto',
+          borderRadius,
+          objectFit: 'contain',
+          border: '2px solid var(--indigo-deep)',
+          boxShadow
+        }}
+      />
+    </div>
+  );
+}
+
 
 
 
@@ -403,23 +452,14 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
           <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: 4 }}>Current question (read-only)</p>
             <div className="question-text" style={{ fontSize: '1.1rem' }}>{question.text}</div>
             {(question.imageUrl || question.image) && (
-              <div style={{ textAlign: 'center', marginTop: 12, marginBottom: 8 }}>
-                <img
-                  src={resolveImageUrl(question.imageUrl || question.image)}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                  style={{
-                    maxHeight: '170px',
-                    maxWidth: '100%',
-                    width: 'auto',
-                    borderRadius: 10,
-                    objectFit: 'contain',
-                    border: '2px solid var(--indigo-deep)',
-                    boxShadow: '0 3px 0 var(--indigo-deep)'
-                  }}
-                />
-              </div>
+              <QuestionImage
+                rawUrl={question.imageUrl || question.image}
+                maxHeight={170}
+                marginTop={12}
+                marginBottom={8}
+                borderRadius={10}
+                boxShadow="0 3px 0 var(--indigo-deep)"
+              />
             )}
             
             {(!question.type || question.type === 'classic') && (
@@ -699,23 +739,14 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
           )}
         </AnimatePresence>
         {(question.imageUrl || question.image) && (
-          <div style={{ textAlign: 'center', marginBottom: 16 }}>
-            <img
-              src={resolveImageUrl(question.imageUrl || question.image)}
-              alt=""
-              referrerPolicy="no-referrer"
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              style={{
-                maxHeight: '180px',
-                maxWidth: '100%',
-                width: 'auto',
-                borderRadius: 12,
-                objectFit: 'contain',
-                border: '2px solid var(--indigo-deep)',
-                boxShadow: '0 4px 0 var(--indigo-deep)'
-              }}
-            />
-          </div>
+          <QuestionImage
+            rawUrl={question.imageUrl || question.image}
+            maxHeight={180}
+            marginTop={0}
+            marginBottom={16}
+            borderRadius={12}
+            boxShadow="0 4px 0 var(--indigo-deep)"
+          />
         )}
         <div className="question-text">{question.text}</div>
 

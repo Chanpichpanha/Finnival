@@ -9,9 +9,18 @@ function getServerBaseUrl() {
   return `http://localhost:${SERVER_PORT}`;
 }
 
-export function resolveImageUrl(url) {
-  if (!url || typeof url !== 'string') return null;
+export function normalizeImageInput(url) {
+  if (!url || typeof url !== 'string') return '';
   const trimmed = url.trim();
+  if (/^www\./i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  return trimmed;
+}
+
+export function resolveImageUrl(url) {
+  const trimmed = normalizeImageInput(url);
+  if (!trimmed) return null;
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:image/')) {
     return trimmed;
   }
