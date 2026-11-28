@@ -407,6 +407,8 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                 <img
                   src={resolveImageUrl(question.imageUrl || question.image)}
                   alt=""
+                  referrerPolicy="no-referrer"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
                   style={{
                     maxHeight: '170px',
                     maxWidth: '100%',
@@ -701,6 +703,8 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
             <img
               src={resolveImageUrl(question.imageUrl || question.image)}
               alt=""
+              referrerPolicy="no-referrer"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
               style={{
                 maxHeight: '180px',
                 maxWidth: '100%',

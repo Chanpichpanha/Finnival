@@ -397,6 +397,8 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
 
   // Manual image upload
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [importingImageUrl, setImportingImageUrl] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [imageUploadError, setImageUploadError] = useState(null);
 
@@ -418,11 +420,29 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
   editingIndexRef.current = editingIndex;
   const reorderTimerRef = useRef(null);
   const pendingReorderRef = useRef(false);
+  const currentImageUrlRef = useRef('');
+  currentImageUrlRef.current = newQuestion.imageUrl || '';
+  const attemptedImportUrlsRef = useRef(new Set());
+  const importRetryTimerRef = useRef(null);
+  const previewImgRef = useRef(null);
 
   const isHost = room?.host?.id === playerId;
 
   useEffect(() => {
+    if (!newQuestion.imageUrl) return;
+    const img = previewImgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) {
+      setImageLoaded(true);
+      setImageError(false);
+    }
+  }, [newQuestion.imageUrl]);
+
+  useEffect(() => {
     return () => {
+      if (importRetryTimerRef.current) {
+        clearTimeout(importRetryTimerRef.current);
+        importRetryTimerRef.current = null;
+      }
       if (reorderTimerRef.current) {
         clearTimeout(reorderTimerRef.current);
         reorderTimerRef.current = null;
@@ -699,9 +719,57 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
     setPasteImportText('');
   };
 
+  const clearPendingImageImport = () => {
+    if (importRetryTimerRef.current) {
+      clearTimeout(importRetryTimerRef.current);
+      importRetryTimerRef.current = null;
+    }
+  };
+
+  const tryImportExternalImage = async (targetUrl) => {
+    if (!targetUrl || (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://'))) return;
+    if (attemptedImportUrlsRef.current.has(targetUrl)) return;
+    attemptedImportUrlsRef.current.add(targetUrl);
+
+    setImportingImageUrl(true);
+    setImageError(false);
+    setImageUploadError(null);
+    try {
+      const headers = await buildAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`${serverUrl}/api/import-image-url`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ url: targetUrl })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (currentImageUrlRef.current.trim() !== targetUrl) return;
+
+      if (res.ok && data.imageUrl) {
+        setNewQuestion((prev) => ({ ...prev, imageUrl: data.imageUrl }));
+        setImageLoaded(false);
+        setImageError(false);
+        setImageUploadError(null);
+        preloadImages([{ imageUrl: data.imageUrl }]);
+      } else {
+        setImageError(true);
+        setImageUploadError(data.error || null);
+      }
+    } catch (err) {
+      if (currentImageUrlRef.current.trim() === targetUrl) {
+        setImageError(true);
+      }
+    } finally {
+      if (currentImageUrlRef.current.trim() === targetUrl) {
+        setImportingImageUrl(false);
+      }
+    }
+  };
+
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    clearPendingImageImport();
+    setImportingImageUrl(false);
     setImageUploadError(null);
     if (file.size > 15 * 1024 * 1024) {
       setImageUploadError('Image is too large (max 15MB).');
@@ -722,6 +790,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
       const data = await res.json();
       if (data.imageUrl) {
         setNewQuestion((prev) => ({ ...prev, imageUrl: data.imageUrl }));
+        setImageLoaded(false);
         setImageError(false);
         preloadImages([{ imageUrl: data.imageUrl }]);
       } else if (data.error) {
@@ -812,9 +881,12 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
   };
 
   const resetManualEditor = () => {
+    clearPendingImageImport();
     setEditingIndex(null);
     setNewQuestion(EMPTY_QUESTION);
     setEditorVersion((v) => v + 1);
+    setImageLoaded(false);
+    setImportingImageUrl(false);
     setImageError(false);
     setImageUploadError(null);
   };
@@ -843,9 +915,12 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
   };
 
   const editQuestion = (i) => {
+    clearPendingImageImport();
     const q = questions[i];
     const limit = Math.max(5, Math.round(Number(q.timeLimit)) || 20);
     setNewQuestion({ ...EMPTY_QUESTION, ...q, timeLimit: limit, imageUrl: q.imageUrl || q.image || '' });
+    setImageLoaded(false);
+    setImportingImageUrl(false);
     setImageError(false);
     setImageUploadError(null);
     setEditingIndex(i);
@@ -1727,11 +1802,15 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                           <input
                             className="input"
-                            placeholder="Paste image URL..."
+                            placeholder="Paste image URL or link..."
                             value={newQuestion.imageUrl || ''}
                             onChange={(e) => {
-                              setNewQuestion({ ...newQuestion, imageUrl: e.target.value });
+                              clearPendingImageImport();
+                              setImportingImageUrl(false);
+                              setImageLoaded(false);
                               setImageError(false);
+                              setImageUploadError(null);
+                              setNewQuestion({ ...newQuestion, imageUrl: e.target.value });
                             }}
                             style={{ flex: '1 1 160px', minWidth: 0, margin: 0 }}
                           />
@@ -1751,8 +1830,12 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                               className="btn btn-danger"
                               style={{ padding: '9px 12px', margin: 0, fontSize: '0.85rem' }}
                               onClick={() => {
+                                clearPendingImageImport();
                                 setNewQuestion({ ...newQuestion, imageUrl: '' });
+                                setImageLoaded(false);
+                                setImportingImageUrl(false);
                                 setImageError(false);
+                                setImageUploadError(null);
                               }}
                             >
                               ✕ Clear
@@ -1773,15 +1856,47 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                               style={{ marginTop: 10 }}
                             >
                               <img
+                                key={resolveImageUrl(newQuestion.imageUrl) || newQuestion.imageUrl}
+                                ref={previewImgRef}
                                 src={resolveImageUrl(newQuestion.imageUrl)}
                                 alt="Preview"
-                                onError={() => setImageError(true)}
-                                onLoad={() => setImageError(false)}
-                                style={{ maxHeight: 110, maxWidth: '100%', borderRadius: 8, border: '2px solid var(--indigo-deep)', objectFit: 'contain', display: imageError ? 'none' : 'block' }}
+                                referrerPolicy="no-referrer"
+                                onError={() => {
+                                  setImageLoaded(false);
+                                  const raw = (newQuestion.imageUrl || '').trim();
+                                  const isExternal = raw.startsWith('http://') || raw.startsWith('https://');
+                                  if (isExternal && !attemptedImportUrlsRef.current.has(raw) && !uploadingImage) {
+                                    clearPendingImageImport();
+                                    importRetryTimerRef.current = setTimeout(() => {
+                                      tryImportExternalImage(raw);
+                                    }, 350);
+                                  } else {
+                                    setImageError(true);
+                                  }
+                                }}
+                                onLoad={() => {
+                                  clearPendingImageImport();
+                                  setImageLoaded(true);
+                                  setImageError(false);
+                                  setImportingImageUrl(false);
+                                }}
+                                style={{
+                                  maxHeight: 110,
+                                  maxWidth: '100%',
+                                  borderRadius: 8,
+                                  border: '2px solid var(--indigo-deep)',
+                                  objectFit: 'contain',
+                                  display: (imageLoaded && !imageError) ? 'block' : 'none'
+                                }}
                               />
-                              {imageError && (
+                              {!imageLoaded && !imageError && (
+                                <div style={{ color: 'var(--muted)', fontSize: '0.84rem', fontWeight: 700 }}>
+                                  {importingImageUrl ? '⏳ Importing image from link...' : '⏳ Loading preview...'}
+                                </div>
+                              )}
+                              {imageError && !imageUploadError && (
                                 <div style={{ color: 'var(--red)', fontSize: '0.85rem', marginTop: 4 }}>
-                                  ⚠️ Could not load image preview
+                                  ⚠️ Could not load image preview — try right-click → &quot;Copy image address&quot; or Upload
                                 </div>
                               )}
                             </motion.div>

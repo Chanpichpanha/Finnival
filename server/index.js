@@ -10,6 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const { clerkMiddleware, getAuth, verifyToken } = require('@clerk/express');
 const questionsStore = require('./questions-store');
 const aiGenerator = require('./ai-quiz-generator');
+const imageImporter = require('./image-importer');
 
 aiGenerator.initEnv();
 
@@ -206,7 +207,10 @@ if (isClerkEnabled()) {
   );
 }
 
-app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(uploadsDir));
 app.get('/uploads/:filename', async (req, res) => {
   try {
     const safeName = path.basename(req.params.filename || '');
@@ -215,10 +219,35 @@ app.get('/uploads/:filename', async (req, res) => {
     if (!imgRow || !imgRow.data) return res.status(404).end();
     res.setHeader('Content-Type', imgRow.mime_type || 'application/octet-stream');
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     fs.promises.writeFile(path.join(uploadsDir, safeName), imgRow.data).catch(() => {});
     return res.send(imgRow.data);
   } catch (e) {
     return res.status(404).end();
+  }
+});
+
+app.post('/api/import-image-url', async (req, res) => {
+  if (isClerkEnabled() && !getRequestUserId(req)) {
+    return res.status(401).json({ error: 'Please sign in to import question images.' });
+  }
+  const rawUrl = String(req.body?.url || '').trim();
+  if (!rawUrl) {
+    return res.status(400).json({ error: 'Please provide an image URL.' });
+  }
+  try {
+    const result = await imageImporter.importImageFromUrl(rawUrl);
+    const filename = `${uuidv4()}${result.ext}`;
+    await fs.promises.writeFile(path.join(uploadsDir, filename), result.buffer);
+    if (questionsStore.isUsingDb()) {
+      await questionsStore.saveUploadedImage(filename, result.mimeType, result.buffer);
+    }
+    return res.json({
+      imageUrl: `/uploads/${filename}`,
+      extractedFromPage: result.extractedFromPage
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message || 'Could not load image from that link.' });
   }
 });
 

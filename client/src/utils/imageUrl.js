@@ -1,12 +1,22 @@
+const SERVER_PORT = 3001;
+
+function getServerBaseUrl() {
+  const configured = (process.env.REACT_APP_SERVER_URL || '').trim().replace(/\/+$/, '');
+  if (configured) return configured;
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${SERVER_PORT}`;
+  }
+  return `http://localhost:${SERVER_PORT}`;
+}
+
 export function resolveImageUrl(url) {
   if (!url || typeof url !== 'string') return null;
   const trimmed = url.trim();
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:image/')) {
     return trimmed;
   }
   if (trimmed.startsWith('/uploads/')) {
-    const host = window.location.hostname || 'localhost';
-    return `http://${host}:3001${trimmed}`;
+    return `${getServerBaseUrl()}${trimmed}`;
   }
   return trimmed;
 }
@@ -24,6 +34,7 @@ export function preloadImages(questions) {
     if (resolved && !preloadedUrls.has(resolved)) {
       preloadedUrls.add(resolved);
       const img = new Image();
+      img.referrerPolicy = 'no-referrer';
       img.src = resolved;
     }
   });
