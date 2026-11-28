@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MatchGame from './MatchGame';
 import { resolveImageUrl } from '../utils/imageUrl';
+import { evaluateShortAnswer } from '../utils/shortAnswerMatcher';
 import { playTick, playSubmit, playFreeze, playHeist, playScramble, playOracle, playDoublePoints } from '../utils/sound';
 
 
@@ -206,6 +207,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   const [burst, setBurst] = useState(null);
   const [selectedOption, setSelectedOption] = useState(null);
   const [shortAnswerText, setShortAnswerText] = useState('');
+  const [answerAck, setAnswerAck] = useState(null);
   const [sliderValue, setSliderValue] = useState(50);
   const [maskedHint, setMaskedHint] = useState(null);
   const [sliderSafeRange, setSliderSafeRange] = useState(null);
@@ -227,8 +229,15 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
     const handleBattleFeed = (item) => {
       setBattleFeed((prev) => [item, ...prev].slice(0, 4));
     };
+    const handleAnswerAck = (ack) => {
+      setAnswerAck(ack || null);
+    };
     socket.on('battleFeedEvent', handleBattleFeed);
-    return () => socket.off('battleFeedEvent', handleBattleFeed);
+    socket.on('answerAck', handleAnswerAck);
+    return () => {
+      socket.off('battleFeedEvent', handleBattleFeed);
+      socket.off('answerAck', handleAnswerAck);
+    };
   }, [socket]);
 
   const me = room?.players.find((p) => p.id === playerId);
@@ -255,6 +264,8 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
     setEliminated(null);
     setPickingTarget(false);
     setSelectedOption(null);
+    setShortAnswerText('');
+    setAnswerAck(null);
     setFrozenUntil(me?.frozen ? Date.now() + 5000 : 0);
     setBlindedUntil(0);
     setScrambledUntil(0);
@@ -484,7 +495,12 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
 
             {question.type === 'short_answer' && (
               <div style={{ marginTop: 12, padding: 12, background: 'var(--amber-tint)', borderRadius: 8, fontWeight: 'bold' }}>
-                Type: Short Answer | Correct: {question.correctAnswerText}
+                <div>Type: Short Answer | Correct: {question.correctAnswerText}</div>
+                {Array.isArray(question.acceptedAnswers) && question.acceptedAnswers.length > 0 && (
+                  <div style={{ marginTop: 4, fontSize: '0.84rem', color: 'var(--muted)' }}>
+                    Also accepted: {question.acceptedAnswers.join(', ')}
+                  </div>
+                )}
               </div>
             )}
 
@@ -789,22 +805,42 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
 
         {question.type === 'short_answer' && (() => {
             const isReveal = gameState?.isReveal;
+            const primaryTarget = gameState?.correctAnswerText || question.correctAnswerText || '';
+            const aliases = Array.isArray(gameState?.acceptedAnswers)
+              ? gameState.acceptedAnswers
+              : (Array.isArray(question.acceptedAnswers) ? question.acceptedAnswers : []);
             let inputBg = 'white';
             let inputColor = 'var(--dark)';
-            let isCorrect = false;
-            
+            let shortVerdict = null;
+
             if (isReveal) {
-                const correctTxt = String(gameState.correctAnswerText || question.correctAnswerText || '').trim().toLowerCase();
-                const ansTxt = String(shortAnswerText || '').trim().toLowerCase();
-                if (ansTxt === correctTxt) {
-                    isCorrect = true;
+                const ackMatchesRound = answerAck && (answerAck.questionIndex === undefined || answerAck.questionIndex === gameState?.index);
+                shortVerdict = (ackMatchesRound && answerAck.matchType)
+                  ? {
+                      isCorrect: Boolean(answerAck.correct),
+                      accuracy: typeof answerAck.accuracy === 'number' ? answerAck.accuracy : (answerAck.correct ? 1 : 0),
+                      matchType: answerAck.matchType,
+                      points: answerAck.points
+                    }
+                  : evaluateShortAnswer(shortAnswerText, primaryTarget, aliases);
+
+                if (shortVerdict.isCorrect) {
+                  inputBg = shortVerdict.accuracy < 0.9 ? '#F59E0B' : 'var(--green)';
                 } else {
-                    const words = correctTxt.split(/\s+/);
-                    isCorrect = words.includes(ansTxt) && ansTxt.length > 4;
+                  inputBg = 'var(--red)';
                 }
-                inputBg = isCorrect ? 'var(--green)' : 'var(--red)';
                 inputColor = 'white';
             }
+
+            const verdictBadge = !isReveal || !shortVerdict ? null : (
+              shortVerdict.isCorrect
+                ? (shortVerdict.matchType === 'partial'
+                    ? `✨ Close! Partial Credit (${Math.round(shortVerdict.accuracy * 100)}%)${shortVerdict.points ? ` · +${shortVerdict.points} pts` : ''}`
+                    : shortVerdict.matchType === 'typo'
+                      ? `✓ Close Spelling — Accepted!${shortVerdict.points ? ` · +${shortVerdict.points} pts` : ''}`
+                      : `✓ Exact Match!${shortVerdict.points ? ` · +${shortVerdict.points} pts` : ''}`)
+                : '✕ Not Quite'
+            );
 
             return (
             <div style={{ padding: 24, textAlign: 'center', background: 'rgba(42,33,66,0.45)', borderRadius: 12 }}>
@@ -844,12 +880,18 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                 placeholder={isScrambled && !isReveal ? 'Typing blind...' : 'Your answer...'}
                 value={shortAnswerText}
                 onChange={(e) => setShortAnswerText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !answered && !isFrozen && !isReveal && !isPaused && shortAnswerText.trim()) {
+                    e.preventDefault();
+                    submitAnswer(shortAnswerText.trim());
+                  }
+                }}
                 disabled={answered || isFrozen || isReveal || isPaused}
                 style={{ 
                     width: '100%', 
                     maxWidth: 400, 
                     fontSize: '1.5rem', 
-                    marginBottom: 24, 
+                    marginBottom: verdictBadge ? 10 : 24, 
                     textAlign: 'center',
                     backgroundColor: inputBg,
                     color: inputColor,
@@ -859,6 +901,16 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                     fontWeight: 'bold', fontFamily: "'Fredoka One', cursive"
                 }}
               />
+              {verdictBadge && (
+                <div style={{
+                  color: shortVerdict.isCorrect ? (shortVerdict.accuracy < 0.9 ? '#FDE68A' : '#86EFAC') : '#FCA5A5',
+                  fontWeight: 800,
+                  fontSize: '0.95rem',
+                  marginBottom: 14
+                }}>
+                  {verdictBadge}
+                </div>
+              )}
               <br/>
               {!isReveal && (
               <button 
@@ -876,7 +928,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                   animate={{ opacity: 1, scale: [0.78, 1.08, 1] }}
                   transition={{ type: 'spring', stiffness: 360, damping: 20 }}
                   style={{
-                    marginTop: 16,
+                    marginTop: 12,
                     padding: '16px',
                     background: 'var(--cream)',
                     borderRadius: 12,
@@ -890,7 +942,12 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                   }}
                 >
                   <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Correct Answer</div>
-                  <div style={{ color: 'var(--green)' }}>{gameState.correctAnswerText || question.correctAnswerText}</div>
+                  <div style={{ color: 'var(--green)' }}>{primaryTarget}</div>
+                  {aliases.length > 0 && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: 6, fontWeight: 700 }}>
+                      Also accepted: {aliases.join(' · ')}
+                    </div>
+                  )}
                 </motion.div>
               )}
             </div>

@@ -11,6 +11,7 @@ const { clerkMiddleware, getAuth, verifyToken } = require('@clerk/express');
 const questionsStore = require('./questions-store');
 const aiGenerator = require('./ai-quiz-generator');
 const imageImporter = require('./image-importer');
+const { evaluateShortAnswer } = require('./short-answer-matcher');
 
 aiGenerator.initEnv();
 
@@ -869,6 +870,16 @@ io.on('connection', (socket) => {
     const minVal = Number(q.min);
     const maxVal = Number(q.max);
     const numVal = Number(q.correctNumber);
+    const primaryText = String(q.correctAnswerText || '').trim().slice(0, 80);
+    const acceptedAnswers = Array.isArray(q.acceptedAnswers)
+      ? Array.from(
+          new Set(
+            q.acceptedAnswers
+              .map((a) => String(a || '').trim().slice(0, 80))
+              .filter((a) => a && a.toLowerCase() !== primaryText.toLowerCase())
+          )
+        ).slice(0, 8)
+      : [];
     return {
       type: q.type || 'classic',
       text: String(q.text || '').slice(0, 200),
@@ -877,7 +888,8 @@ io.on('connection', (socket) => {
       timeLimit: Math.max(5, Math.round(Number(q.timeLimit)) || 20),
       image: img,
       imageUrl: img,
-      correctAnswerText: q.correctAnswerText || '',
+      correctAnswerText: primaryText,
+      acceptedAnswers,
       min: Number.isFinite(minVal) ? minVal : 0,
       max: Number.isFinite(maxVal) ? maxVal : 100,
       correctNumber: Number.isFinite(numVal) ? numVal : 50,
@@ -1111,6 +1123,7 @@ io.on('connection', (socket) => {
     io.to(room.pin).emit('answerReveal', {
       correctAnswer: q.correctAnswer,
       correctAnswerText: q.correctAnswerText,
+      acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers : [],
       correctNumber: q.correctNumber,
       pairs: q.pairs,
       distribution,
@@ -1158,26 +1171,17 @@ io.on('connection', (socket) => {
 
     let isCorrect = false;
     let accuracy = 0;
+    let matchType = null;
 
     const qType = q.type || 'classic';
     if (qType === 'classic') {
       isCorrect = Number.isInteger(answerIndex) && answerIndex === q.correctAnswer;
       accuracy = isCorrect ? 1 : 0;
     } else if (qType === 'short_answer') {
-      const correctTxt = String(q.correctAnswerText || '').trim().toLowerCase();
-      const ansTxt = String(answerIndex || '').trim().toLowerCase();
-      if (ansTxt && correctTxt) {
-          if (ansTxt === correctTxt) {
-             isCorrect = true;
-             accuracy = 1;
-          } else {
-             const words = correctTxt.split(/\s+/);
-             if (words.includes(ansTxt) && ansTxt.length > 4) {
-                 isCorrect = true;
-                 accuracy = 1;
-             }
-          }
-        }
+      const evaluated = evaluateShortAnswer(answerIndex, q.correctAnswerText, q.acceptedAnswers);
+      isCorrect = evaluated.isCorrect;
+      accuracy = evaluated.accuracy;
+      matchType = evaluated.matchType;
     } else if (qType === 'slider') {
       const target = Number(q.correctNumber) || 0;
       const range = (Number(q.max) - Number(q.min)) || 100;
@@ -1242,7 +1246,10 @@ io.on('connection', (socket) => {
     room.lastRound = { name: player.name, correct: isCorrect, points: earnedPoints };
 
     socket.emit('answerAck', {
+      questionIndex: room.questionIndex,
       correct: isCorrect,
+      accuracy,
+      matchType,
       points,
       total: player.score,
       streak: player.streak

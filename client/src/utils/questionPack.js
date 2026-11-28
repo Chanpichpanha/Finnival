@@ -5,7 +5,7 @@ Use this exact schema and mix question types ("classic", "short_answer", "slider
   "name": "Quiz Title",
   "questions": [
     { "type": "classic", "text": "Multiple choice question?", "options": ["A", "B", "C", "D"], "correctAnswer": 0, "timeLimit": 20 },
-    { "type": "short_answer", "text": "Short answer question?", "correctAnswerText": "Exact answer", "timeLimit": 25 },
+    { "type": "short_answer", "text": "Short answer question?", "correctAnswerText": "Primary answer", "acceptedAnswers": ["Optional alias"], "timeLimit": 25 },
     { "type": "slider", "text": "Numeric guess question?", "min": 0, "max": 100, "correctNumber": 50, "timeLimit": 20 },
     { "type": "match", "text": "Match the pairs:", "pairs": [{"left": "Item 1", "right": "Match 1"}, {"left": "Item 2", "right": "Match 2"}], "timeLimit": 30 }
   ]
@@ -156,12 +156,23 @@ export function parseImportedPack(rawText) {
         q.answer ??
         (typeof q.correctAnswer === 'string' ? q.correctAnswer : '')
       ).trim();
+      const rawAliases = q.acceptedAnswers ?? q.accepted_answers ?? q.aliases;
+      const acceptedAnswers = Array.isArray(rawAliases)
+        ? Array.from(
+            new Set(
+              rawAliases
+                .map((a) => String(a || '').trim().slice(0, 80))
+                .filter((a) => a && a.toLowerCase() !== ansTxt.toLowerCase())
+            )
+          ).slice(0, 8)
+        : [];
       normalized.push({
         type,
         text: qText,
         options: ['', '', '', ''],
         correctAnswer: 0,
         correctAnswerText: ansTxt,
+        acceptedAnswers,
         min: 0,
         max: 100,
         correctNumber: 50,

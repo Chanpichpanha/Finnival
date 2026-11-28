@@ -23,6 +23,7 @@ const EMPTY_QUESTION = {
   options: ['', '', '', ''],
   correctAnswer: 0,
   correctAnswerText: '',
+  acceptedAnswers: [],
   min: 0,
   max: 100,
   correctNumber: 50,
@@ -351,6 +352,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
   const [questions, setQuestions] = useState(() => room?.questions || []);
   const [builderTab, setBuilderTab] = useState('ai'); // 'ai' | 'manual' | 'saved'
   const [newQuestion, setNewQuestion] = useState(EMPTY_QUESTION);
+  const [acceptedAnswersInput, setAcceptedAnswersInput] = useState('');
   const [editingIndex, setEditingIndex] = useState(null);
   const [editorVersion, setEditorVersion] = useState(0);
 
@@ -1025,6 +1027,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
     browserImgStatusRef.current = 'idle';
     setEditingIndex(null);
     setNewQuestion(EMPTY_QUESTION);
+    setAcceptedAnswersInput('');
     setEditorVersion((v) => v + 1);
     setImageLoaded(false);
     setImportingImageUrl(false);
@@ -1036,12 +1039,26 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
     if (importingImageUrl && !imageLoaded) return;
     if (!newQuestion.text.trim()) return;
     if ((!newQuestion.type || newQuestion.type === 'classic') && newQuestion.options.some((o) => !o.trim())) return;
+    if (newQuestion.type === 'short_answer' && !String(newQuestion.correctAnswerText || '').trim()) return;
     if (newQuestion.type === 'match' && newQuestion.pairs.some((p) => !p.left.trim() || !p.right.trim())) return;
 
     const finalTimeLimit = Math.max(5, Math.round(Number(newQuestion.timeLimit)) || 20);
+    const primaryShort = String(newQuestion.correctAnswerText || '').trim();
+    const parsedAliases = newQuestion.type === 'short_answer'
+      ? Array.from(
+          new Set(
+            acceptedAnswersInput
+              .split(',')
+              .map((s) => s.trim().slice(0, 80))
+              .filter((s) => s && s.toLowerCase() !== primaryShort.toLowerCase())
+          )
+        ).slice(0, 8)
+      : [];
 
     const qToSave = {
       ...newQuestion,
+      correctAnswerText: primaryShort,
+      acceptedAnswers: parsedAliases,
       timeLimit: finalTimeLimit,
       image: newQuestion.imageUrl || null,
       imageUrl: newQuestion.imageUrl || null
@@ -1063,6 +1080,7 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
     const q = questions[i];
     const limit = Math.max(5, Math.round(Number(q.timeLimit)) || 20);
     setNewQuestion({ ...EMPTY_QUESTION, ...q, timeLimit: limit, imageUrl: q.imageUrl || q.image || '' });
+    setAcceptedAnswersInput(Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers.join(', ') : '');
     setImageLoaded(false);
     setImportingImageUrl(false);
     setImageError(false);
@@ -2141,8 +2159,21 @@ function LobbyScreen({ socket, room, pin, playerId, setScreen }) {
                               placeholder="e.g. Paris"
                               value={newQuestion.correctAnswerText || ''}
                               onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswerText: e.target.value })}
-                              style={{ width: '100%', marginBottom: 12 }}
+                              style={{ width: '100%', marginBottom: 10 }}
                             />
+                            <label style={{ display: 'block', marginBottom: 6, fontWeight: 700, fontSize: '0.86rem', color: 'var(--indigo)' }}>
+                              Also Accept <span style={{ fontWeight: 600, color: 'var(--muted)' }}>(Optional aliases, comma-separated)</span>
+                            </label>
+                            <input
+                              className="input"
+                              placeholder="e.g. City of Light, Ville Lumiere"
+                              value={acceptedAnswersInput}
+                              onChange={(e) => setAcceptedAnswersInput(e.target.value)}
+                              style={{ width: '100%', marginBottom: 6 }}
+                            />
+                            <div style={{ fontSize: '0.78rem', color: 'var(--muted)', fontWeight: 600, marginBottom: 12 }}>
+                              ✨ Small typos, ignored &quot;the/a&quot;, and missing-word partial credit apply automatically!
+                            </div>
                           </motion.div>
                         )}
 

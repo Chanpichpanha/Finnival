@@ -118,12 +118,23 @@ function validateAndNormalizeAiOutput(rawContent, defaultTimeLimit = 20) {
     } else if (type === 'short_answer') {
       const ans = String(q.correctAnswerText ?? q.correct_answer ?? q.answer ?? '').trim().slice(0, 80);
       if (!ans) return;
+      const rawAliases = q.acceptedAnswers ?? q.accepted_answers ?? q.aliases;
+      const acceptedAnswers = Array.isArray(rawAliases)
+        ? Array.from(
+            new Set(
+              rawAliases
+                .map((a) => String(a || '').trim().slice(0, 80))
+                .filter((a) => a && a.toLowerCase() !== ans.toLowerCase())
+            )
+          ).slice(0, 6)
+        : [];
       normalized.push({
         type: 'short_answer',
         text,
         options: ['', '', '', ''],
         correctAnswer: 0,
         correctAnswerText: ans,
+        acceptedAnswers,
         min: 0,
         max: 100,
         correctNumber: 50,
@@ -206,7 +217,7 @@ function buildQuizPrompts({ topic, count, types, difficulty, timeLimit }) {
     typeRules.push(`- "classic": {"type": "classic", "text": "question (<=180 chars)", "options": ["opt1", "opt2", "opt3", "opt4"], "correctAnswer": 0_based_integer_index, "timeLimit": ${timeLimit}}`);
   }
   if (chosenTypes.includes('short_answer')) {
-    typeRules.push(`- "short_answer": {"type": "short_answer", "text": "question requiring 1-2 word answer", "correctAnswerText": "exact short answer", "timeLimit": ${timeLimit}}`);
+    typeRules.push(`- "short_answer": {"type": "short_answer", "text": "question requiring 1-3 word answer", "correctAnswerText": "primary short answer", "acceptedAnswers": ["optional alias or short form"], "timeLimit": ${timeLimit}}`);
   }
   if (chosenTypes.includes('slider')) {
     typeRules.push(`- "slider": {"type": "slider", "text": "numeric estimate/year/count question", "min": number, "max": number, "correctNumber": number_strictly_between_min_and_max, "timeLimit": ${timeLimit}}`);
