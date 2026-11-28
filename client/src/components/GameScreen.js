@@ -189,6 +189,7 @@ function getResultLabel(qType, res) {
  */
 function RevealResultBanner({ gameState, question, playerId, answerAck, answered, lastSubmittedValue }) {
   const qType = question?.type || 'classic';
+  const showAccuracy = qType !== 'classic';
   const revealResult = gameState?.playerResults?.[playerId] || null;
   const ackMatches =
     answerAck && (answerAck.questionIndex === undefined || answerAck.questionIndex === gameState?.index)
@@ -231,7 +232,9 @@ function RevealResultBanner({ gameState, question, playerId, answerAck, answered
           {gameState?.skipped ? '⏭️ Question Skipped' : "⏱️ Time's Up — No Answer"}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: '0.82rem', fontWeight: 800, opacity: 0.8 }}>0% accuracy</span>
+          {showAccuracy && (
+            <span style={{ fontSize: '0.82rem', fontWeight: 800, opacity: 0.8 }}>0% accuracy</span>
+          )}
           <span style={{
             padding: '4px 12px',
             borderRadius: 999,
@@ -299,16 +302,18 @@ function RevealResultBanner({ gameState, question, playerId, answerAck, answered
         <span style={{ fontWeight: 900, fontSize: '1rem' }}>
           {getResultLabel(qType, res)}
         </span>
-        <span style={{
-          fontSize: '0.8rem',
-          fontWeight: 800,
-          padding: '2px 9px',
-          borderRadius: 999,
-          background: 'rgba(255, 255, 255, 0.72)',
-          color: theme.text
-        }}>
-          {pct}% accuracy
-        </span>
+        {showAccuracy && (
+          <span style={{
+            fontSize: '0.8rem',
+            fontWeight: 800,
+            padding: '2px 9px',
+            borderRadius: 999,
+            background: 'rgba(255, 255, 255, 0.72)',
+            color: theme.text
+          }}>
+            {pct}% accuracy
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {res.correct && res.streak >= 2 && (
@@ -419,7 +424,10 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
   const [selectedOption, setSelectedOption] = useState(null);
   const [shortAnswerText, setShortAnswerText] = useState('');
   const [answerAck, setAnswerAck] = useState(null);
-  const [sliderValue, setSliderValue] = useState(50);
+  const [sliderValue, setSliderValue] = useState(() => {
+    const minVal = Number(gameState?.question?.min);
+    return Number.isFinite(minVal) ? minVal : 0;
+  });
   const lastSubmittedValueRef = useRef(null);
   const [maskedHint, setMaskedHint] = useState(null);
   const [sliderSafeRange, setSliderSafeRange] = useState(null);
@@ -480,12 +488,7 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
     setAnswerAck(null);
     lastSubmittedValueRef.current = null;
     const minVal = Number(gameState?.question?.min);
-    const maxVal = Number(gameState?.question?.max);
-    if (Number.isFinite(minVal) && Number.isFinite(maxVal)) {
-      setSliderValue(Math.round((minVal + maxVal) / 2));
-    } else {
-      setSliderValue(50);
-    }
+    setSliderValue(Number.isFinite(minVal) ? minVal : 0);
     setFrozenUntil(me?.frozen ? Date.now() + 5000 : 0);
     setBlindedUntil(0);
     setScrambledUntil(0);
@@ -1192,7 +1195,8 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
             <div style={{ fontSize: '3rem', marginBottom: 24, color: 'white', fontWeight: 'bold' }}>
               {isScrambled && !gameState?.isReveal ? '???' : sliderValue}
             </div>
-            <input 
+            <input
+                key={`slider-${gameState?.index}`}
                 type="range" 
                 min={question.min} 
                 max={question.max} 
@@ -1206,14 +1210,16 @@ function GameScreen({ socket, gameState, room, playerId, answerCount }) {
                <span>{isScrambled && !gameState?.isReveal ? '?' : question.min}</span>
                <span>{isScrambled && !gameState?.isReveal ? '?' : question.max}</span>
             </div>
-            <button 
-              className="btn btn-primary" 
-              disabled={answered || isFrozen || gameState?.isReveal || isPaused}
-              onClick={() => submitAnswer(sliderValue)}
-              style={{ width: '100%', maxWidth: 400, fontSize: '1.2rem', padding: '16px' }}
-            >
-              Submit Answer
-            </button>
+            {!gameState?.isReveal && (
+              <button 
+                className="btn btn-primary" 
+                disabled={answered || isFrozen || isPaused}
+                onClick={() => submitAnswer(sliderValue)}
+                style={{ width: '100%', maxWidth: 400, fontSize: '1.2rem', padding: '16px' }}
+              >
+                Submit Answer
+              </button>
+            )}
             {gameState?.isReveal && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.78 }}
